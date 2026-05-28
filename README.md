@@ -11,26 +11,38 @@ This project ships with two public downloads:
 - `1.0.0` - the main public release, used by default
 - `Original` - the restore package for the stock launcher entry
 
-Both releases install into:
+Both releases install into the game root and the modtools launcher folder:
 
+- `Call of Duty Black Ops III\`
 - `Call of Duty Black Ops III\modtools\`
 
 These are launcher-only releases. Do not replace the compiler, linker, or Radiant files.
+If you install `Original`, Steam will open the stock launcher again by design.
+Use `1.0.0` if you want the new launcher.
 
 ## Install
 
 1. Download the release you want.
-2. Extract it into `Call of Duty Black Ops III\modtools\`.
+2. Extract it into `Call of Duty Black Ops III\`.
 3. Overwrite the launcher files when prompted.
+
+After `1.0.0` is installed, you should have:
+
+- `Call of Duty Black Ops III\modtools_launcher.bat`
+- `Call of Duty Black Ops III\modtools\modtools_launcher.bat`
+- `Call of Duty Black Ops III\modtools\ModLauncherCustomRuntime\*`
 
 For `1.0.0`, the important files are:
 
 - `modtools_launcher.bat`
-- `ModLauncherCustomRuntime\*`
+- `modtools\modtools_launcher.bat`
+- `modtools\ModLauncherCustomRuntime\*`
 
 For `Original`, the package only restores:
 
 - `modtools_launcher.bat`
+
+That package is meant to bring back the stock launcher entry, not the new one.
 
 ## Source
 
