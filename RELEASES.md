@@ -16,8 +16,9 @@ Use this when you want to undo the launcher replacement and put the original Ste
 
 ## Install target
 
-Both releases install into the same folder:
+Both releases install into the game root and the modtools launcher folder:
 
+- `Call of Duty Black Ops III\`
 - `Call of Duty Black Ops III\modtools\`
 
 ## 1.0.0 contents
@@ -25,22 +26,29 @@ Both releases install into the same folder:
 The public release should include only the launcher entry and its runtime:
 
 - `modtools_launcher.bat`
-- `ModLauncherCustomRuntime\ModLauncher_custom.exe`
-- `ModLauncherCustomRuntime\D3Dcompiler_47.dll`
-- `ModLauncherCustomRuntime\Qt6Core.dll`
-- `ModLauncherCustomRuntime\Qt6Gui.dll`
-- `ModLauncherCustomRuntime\Qt6Network.dll`
-- `ModLauncherCustomRuntime\Qt6Svg.dll`
-- `ModLauncherCustomRuntime\Qt6Widgets.dll`
-- `ModLauncherCustomRuntime\steam_api64.dll`
-- `ModLauncherCustomRuntime\steam_appid.txt`
-- `ModLauncherCustomRuntime\generic\*`
-- `ModLauncherCustomRuntime\iconengines\*`
-- `ModLauncherCustomRuntime\imageformats\*`
-- `ModLauncherCustomRuntime\networkinformation\*`
-- `ModLauncherCustomRuntime\platforms\*`
-- `ModLauncherCustomRuntime\styles\*`
-- `ModLauncherCustomRuntime\tls\*`
+- `modtools\modtools_launcher.bat`
+- `modtools\ModLauncherCustomRuntime\ModLauncher_custom.exe`
+- `modtools\ModLauncherCustomRuntime\D3Dcompiler_47.dll`
+- `modtools\ModLauncherCustomRuntime\Qt6Core.dll`
+- `modtools\ModLauncherCustomRuntime\Qt6Gui.dll`
+- `modtools\ModLauncherCustomRuntime\Qt6Network.dll`
+- `modtools\ModLauncherCustomRuntime\Qt6Svg.dll`
+- `modtools\ModLauncherCustomRuntime\Qt6Widgets.dll`
+- `modtools\ModLauncherCustomRuntime\steam_api64.dll`
+- `modtools\ModLauncherCustomRuntime\steam_appid.txt`
+- `modtools\ModLauncherCustomRuntime\generic\*`
+- `modtools\ModLauncherCustomRuntime\iconengines\*`
+- `modtools\ModLauncherCustomRuntime\imageformats\*`
+- `modtools\ModLauncherCustomRuntime\networkinformation\*`
+- `modtools\ModLauncherCustomRuntime\platforms\*`
+- `modtools\ModLauncherCustomRuntime\styles\*`
+- `modtools\ModLauncherCustomRuntime\tls\*`
+
+After extraction, the installed layout should be:
+
+- `Call of Duty Black Ops III\modtools_launcher.bat`
+- `Call of Duty Black Ops III\modtools\modtools_launcher.bat`
+- `Call of Duty Black Ops III\modtools\ModLauncherCustomRuntime\*`
 
 ## Original contents
 

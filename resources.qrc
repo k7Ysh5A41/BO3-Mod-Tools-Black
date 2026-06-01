@@ -9,9 +9,16 @@
         <file>resources/Go.png</file>
         <file>resources/FileNew.png</file>
         <file>resources/upload.png</file>
+        <file>resources/new-mapmod.png</file>
+        <file>resources/build.png</file>
+        <file>resources/diagnosis.png</file>
+        <file>resources/upload-check.png</file>
+        <file>resources/toolkit.png</file>
         <file>resources/checkmark_white.svg</file>
         <file>resources/ancient-murial.png</file>
         <file>resources/ancient-murial-wide.png</file>
+        <file>resources/default_scripts.txt</file>
+        <file>resources/default_ui.txt</file>
         <file>resources/forestbg.png</file>
         <file>stylesheet/stylesheet/checkbox.png</file>
         <file>stylesheet/stylesheet/down_arrow.png</file>

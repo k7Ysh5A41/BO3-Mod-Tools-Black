@@ -24,14 +24,17 @@
 #pragma comment(lib, "Qt6Cored.lib")
 #pragma comment(lib, "Qt6Guid.lib")
 #pragma comment(lib, "Qt6Widgetsd.lib")
+#pragma comment(lib, "Qt6Networkd.lib")
 #else
 #pragma comment(lib, "Qt6Core.lib")
 #pragma comment(lib, "Qt6Gui.lib")
 #pragma comment(lib, "Qt6Widgets.lib")
+#pragma comment(lib, "Qt6Network.lib")
 #endif
 
 #else //If a standard version of Qt is being used, link the standard library names
 #pragma comment(lib, "Qt6Core.lib")
 #pragma comment(lib, "Qt6Gui.lib")
 #pragma comment(lib, "Qt6Widgets.lib")
+#pragma comment(lib, "Qt6Network.lib")
 #endif

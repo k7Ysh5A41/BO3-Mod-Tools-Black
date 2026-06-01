@@ -21,6 +21,10 @@ class Dvar
 {
 private:
 	dvar_s dvar;
+	static QString SettingKey(const dvar_s&);
+	static QVariant DefaultValue(const dvar_s&);
+	static QVariant StoredValue(const dvar_s&);
+	static void UpdateItemState(QTreeWidgetItem*, const dvar_s&, const QVariant&);
 
 public:
 	Dvar();
@@ -30,6 +34,7 @@ public:
 	static QString setDvarSetting(dvar_s, QCheckBox*);
 	static QString setDvarSetting(dvar_s, QSpinBox*);
 	static QString setDvarSetting(dvar_s, QLineEdit*);
+	static QString launchValue(dvar_s);
 
-	static dvar_s findDvar(QString, QTreeWidget*, dvar_s*, int);
+	static dvar_s findDvar(QString, dvar_s*, int);
 };

@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QtWidgets/QtWidgets>
+#include <QtNetwork/QtNetwork>
 #include "steam_api.h"
 #include "dvar.h"
 

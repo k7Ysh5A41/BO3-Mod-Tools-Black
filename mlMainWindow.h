@@ -39,6 +39,7 @@ public:
 
 signals:
 	void OutputReady(const QString& Output);
+	void CommandFinished(const QString& Program, const QStringList& Arguments, qint64 DurationMs, int ExitCode);
 
 protected:
 	QList<QPair<QString, QStringList>> mCommands;
@@ -81,6 +82,8 @@ protected:
 	volatile qint64 mActiveProcessId;
 };
 
+class QuickLaunchPicker;
+
 class mlMainWindow : public QMainWindow
 {
 	Q_OBJECT
@@ -110,6 +113,7 @@ protected slots:
 	void OnEditBuild();
 	void OnEditBuildAllLanguages();
 	void OnEditReadyForPublish();
+	void OnAnalyzeItem();
 	void OnEditPublish();
 	void OnEditOptions();
 	void OnSetModernTheme();
@@ -117,23 +121,32 @@ protected slots:
 	void OnSetClassicTheme();
 	void OnEditDvars();
 	void OnHelpAbout();
+	void OnHelpCredits();
+	void OnHelpGuide();
+	void OnCheckForUpdates();
 	void OnOpenZoneFile();
 	void OnOpenModRootFolder();
+	void OnOpenConsoleLog();
+	void OnOpenConsoleLogExternal();
+	void OnOpenScriptReference();
 	void OnRunMapOrMod();
 	void OnSaveLog() const;
 	void OnCleanXPaks();
 	void OnDelete();
+	void OnRenameItem();
 	void OnToggleFavorite();
 	void OnExport2BinChooseDirectory();
 	void OnExport2BinToggleOverwriteFiles();
 	void BuildOutputReady(QString Output);
 	void FlushBuildOutput();
 	void BuildFinished();
-	void ContextMenuRequested();
+	void ContextMenuRequested(const QPoint& Position);
 	void SteamUpdate();
+	void StatsTick();
 
 protected:
 	void closeEvent(QCloseEvent* Event);
+	void showEvent(QShowEvent* Event);
 	bool eventFilter(QObject* Watched, QEvent* Event);
 
 	enum BuildLanguageMode
@@ -151,12 +164,12 @@ protected:
 
 	enum CategoryTab
 	{
+		CategoryAll,
 		CategoryRecent,
 		CategoryFavorites,
 		CategoryZMMaps,
 		CategoryMPMaps,
-		CategoryMods,
-		CategoryAll
+		CategoryMods
 	};
 
 	void StartBuild(BuildLanguageMode Mode);
@@ -164,6 +177,22 @@ protected:
 	void StartConvertThread(QStringList& pathList, QString& outputDir, bool allowOverwrite);
 	void SetActiveBuildButton(BuildLanguageMode Mode);
 	void ResetBuildButtons();
+	QTreeWidgetItem* ActiveFileItem() const;
+	void CheckForUpdates(bool UserInitiated);
+	void HandleUpdateMetadata(const QJsonObject& Root, bool UserInitiated);
+	void RecordUserActivity();
+	void UpdateStatsTimers();
+	void FlushCurrentItemTime();
+	void SetCurrentStatsItem(QTreeWidgetItem* Item);
+	QString NormalizeStatsItemKey(const QString& FavoriteKey) const;
+	void AddStatSeconds(const QString& Key, qint64 Seconds);
+	void IncrementStat(const QString& Key, qint64 Amount = 1);
+	qint64 StatValue(const QString& Key) const;
+	QString FormatDuration(qint64 Seconds) const;
+	QString DisplayNameForStatsKey(const QString& FavoriteKey) const;
+	void TrackProcessLifetime(QProcess* Process, const QString& CountKey, const QString& SecondsKey, const QString& PerItemSecondsPrefix = QString(), const QString& ItemKey = QString());
+	void OnBuildCommandFinished(const QString& Program, const QStringList& Arguments, qint64 DurationMs, int ExitCode);
+	void SetFooterUpdateState(const QString& Message, const QString& DownloadUrl = QString(), const QString& VersionLabel = QString(), const QString& ReleasePageUrl = QString(), bool UpdateAvailable = false);
 	QString GetItemContainerName(QTreeWidgetItem* Item) const;
 	QString GetItemEntryName(QTreeWidgetItem* Item) const;
 	QString GetItemFavoriteKey(QTreeWidgetItem* Item) const;
@@ -191,16 +220,24 @@ protected:
 	GameRunningState DetectGameRunningState();
 	bool IsTrackedGameProcessAlive() const;
 	QString DisplayTextForItem(int ItemType, const QString& ContainerName, const QString& EntryName) const;
+	QString ItemContentRoot(int ItemType, const QString& ContainerName, const QString& EntryName) const;
+	quint64 ItemDiskSizeBytes(int ItemType, const QString& ContainerName, const QString& EntryName) const;
 	QWidget* CreateItemTitleWidget(QTreeWidgetItem* Item, int ItemType, const QString& ContainerName, const QString& EntryName, const QString& FavoriteKey, const QString& BaseText);
 	void PopulatePinnedRoot(QTreeWidgetItem* RootItem, const QStringList& Keys, const QHash<QString, QVariantMap>& Lookup);
 	QWidget* CreateQuickActionsWidget(QTreeWidgetItem* Item, int ItemType, const QString& ContainerName, const QString& EntryName, const QString& FavoriteKey, bool IsChildRow);
 	void RunQuickAction(int ItemType, const QString& ContainerName, const QString& EntryName, bool LinkAction, bool RunAction);
+	void QueueGameStatsForItem(const QString& FavoriteKey);
+	void FinalizeGameStatsTransition(GameRunningState PreviousState, GameRunningState CurrentState);
+	void ShowItemInformationDialog(QTreeWidgetItem* Item);
+	bool ShouldUseSteamOnlineLaunch() const;
 	QString ResolveSteamExecutablePath() const;
 	QPair<QString, QStringList> CreateGameLaunchCommand(const QString& FsGame, const QString& MapName = QString()) const;
 	QStringList DetectBuiltLanguages(const QString& ContentRoot) const;
 	bool HasOnlyEnglishBuild(const QString& ContentRoot) const;
 	QString SectionSettingKey(const QString& SectionName) const;
 	QString LauncherDataRoot() const;
+	QString DefaultScriptsManifestPath() const;
+	QString DefaultUiManifestPath() const;
 	QString NotesFilePath(int ItemType, const QString& ContainerName, const QString& EntryName) const;
 	QString WorkshopVersionsRoot(int ItemType, const QString& ContainerName, const QString& EntryName) const;
 	QString ActiveWorkshopFolder(int ItemType, const QString& ContainerName, const QString& EntryName) const;
@@ -208,6 +245,12 @@ protected:
 	bool SaveWorkshopVersionSnapshot(int ItemType, const QString& ContainerName, const QString& EntryName, const QString& SourceWorkshopJsonPath, const QString& VersionLabel, const QString& OverridePublisherId = QString());
 	bool ActivateWorkshopVersion(int ItemType, const QString& ContainerName, const QString& EntryName, const QString& VersionFolderPath);
 	void ShowWorkshopVersionsDialog(QTreeWidgetItem* Item);
+	bool EnsureDefaultScriptsManifest(QString* Error = NULL) const;
+	bool EnsureDefaultUiManifest(QString* Error = NULL) const;
+	QSet<QString> LoadDefaultScriptsManifest(QString* Error = NULL) const;
+	QSet<QString> LoadDefaultUiManifest(QString* Error = NULL) const;
+	bool RenameSelectedItem(QTreeWidgetItem* Item, const QString& NewName, bool DuplicateMode);
+	void ShowAnalysisResults(const QString& Title, const QStringList& Findings, const QStringList& Warnings) const;
 
 	void PopulateFileList();
 	bool SaveWorkshopMetadata();
@@ -223,12 +266,23 @@ protected:
 	QVariantMap ThemeProfileValues(const QString& ThemeProfileId) const;
 	void SaveThemeProfile(const QString& ThemeProfileId, const QString& DisplayName, const QVariantMap& Values);
 	void ApplyThemeProfile(const QString& ThemeProfileId);
+	void PopulateQuickLaunchEntries();
+	void PopulateWorkshopQuickLaunchEntries();
 	void ShowOnlineLaunchProgressDialog(const QString& TargetLabel);
 	void CloseOnlineLaunchProgressDialog();
 	void UpdateBuildActionButtons();
+	void UpdateQuickLaunchVisibility();
+	void UpdateCategorySummary(const QHash<QString, QVariantMap>& Lookup, const QStringList& Recents, const QStringList& Favorites);
 	void UpdateOutputConsoleMode();
 	void RebuildOutputFromBuffer();
 	void AppendOutputBlock(const QString& BlockText, const QSettings& Settings);
+	void RefreshRunDvars();
+	bool IsNewerLauncherVersion(const QString& AvailableVersion) const;
+	QString UpdateApiUrl() const;
+	QString UpdateReleasesPageUrl() const;
+	QJsonObject SelectPrimaryReleaseAsset(const QJsonArray& Assets) const;
+	void StartUpdateDownload(const QUrl& DownloadUrl, const QString& VersionLabel);
+	bool LaunchUpdateInstaller(const QString& ZipPath, const QString& VersionLabel);
 	bool IsGameRunning() const;
 	void UpdateGameRunningState();
 	void ApplyLauncherLayout();
@@ -241,21 +295,34 @@ protected:
 
 	QAction* mActionFileNew;
 	QAction* mActionFileAssetEditor;
+	QAction* mActionFileOpenRoot;
+	QAction* mActionFileOpenConsoleLog;
+	QAction* mActionFileOpenConsoleLogExternal;
+	QAction* mActionFileOpenScriptReference;
 	QAction* mActionFileLevelEditor;
 	QAction* mActionFileExport2Bin;
 	QAction* mActionFileExit;
 	QAction* mActionEditBuild;
 	QAction* mActionEditBuildAllLanguages;
+	QAction* mActionEditAnalyze;
+	QAction* mActionEditInformation;
 	QAction* mActionEditReadyForPublish;
 	QAction* mActionEditPublish;
 	QAction* mActionEditOptions;
 	QAction* mActionHelpAbout;
+	QAction* mActionHelpCredits;
+	QAction* mActionHelpCheckUpdates;
+	QAction* mActionHelpGuide;
 	QAction* mActionThemeModern;
 	QAction* mActionThemeDarkModern;
 	QAction* mActionThemeClassic;
 
 	QTabBar* mCategoryTabs;
+	QLabel* mCategorySummaryLabel;
 	QSplitter* mCentralWidgetSplitter;
+	QDockWidget* mAssetDockWidget;
+	QDockWidget* mOutputDockWidget;
+	QToolBar* mMainToolBar;
 	QWidget* mTopWidget;
 	QWidget* mLeftPanel;
 	QWidget* mActionsPanel;
@@ -269,11 +336,16 @@ protected:
 	QLabel* mOutputBackgroundOverlay;
 	QToolButton* mLogFiltersButton;
 	QToolButton* mLogSelectionButton;
+	QLabel* mFooterVersionLabel;
+	QToolButton* mFooterRefreshButton;
+	QLabel* mFooterUpdateStatusLabel;
+	QPushButton* mFooterDownloadButton;
 	QTreeWidgetItem* mCurrentOutputBlockItem;
 	int mOutputBlockCounter;
 
 	QPushButton* mBuildButton;
 	QPushButton* mBuildAllLanguagesButton;
+	QPushButton* mAnalyzeItemButton;
 	QPushButton* mActiveBuildButton;
 	QPushButton* mThemesButton;
 	QPushButton* mDvarsButton;
@@ -286,7 +358,11 @@ protected:
 	QCheckBox* mRunEnabledWidget;
 	QCheckBox* mRunOnlineWidget;
 	QLineEdit* mRunOptionsWidget;
-	QComboBox* mQuickLaunchWidget;
+	QLabel* mQuickLaunchLabel;
+	QLabel* mStartupQuoteLabel;
+	QString mStartupQuoteText;
+	bool mStartupQuotePopupShown;
+	QuickLaunchPicker* mQuickLaunchWidget;
 	QPushButton* mCloseGameButton;
 	QLabel* mCloseGameStatusLabel;
 	QCheckBox* mIgnoreErrorsWidget;
@@ -298,6 +374,27 @@ protected:
 	QCheckBox* mExport2BinOverwriteWidget;
 	QLineEdit* mExport2BinTargetDirWidget;
 	QPointer<QProgressDialog> mLaunchProgressDialog;
+	QNetworkAccessManager* mUpdateNetworkAccess;
+	QPointer<QNetworkReply> mUpdateMetadataReply;
+	QPointer<QNetworkReply> mUpdateDownloadReply;
+	QPointer<QProgressDialog> mUpdateProgressDialog;
+	QFile* mUpdateDownloadFile;
+	QString mUpdateDownloadPath;
+	QString mPendingUpdateVersion;
+	QString mAvailableUpdateVersion;
+	QString mAvailableUpdateUrl;
+	QString mAvailableReleasePageUrl;
+	QTimer mStatsTimer;
+	QElapsedTimer mStatsElapsedTimer;
+	qint64 mLastStatsTickMs;
+	qint64 mLastActivityMs;
+	qint64 mCurrentItemStartedMs;
+	qint64 mPendingGameQueuedMs;
+	qint64 mCurrentGameStartedMs;
+	qint64 mPendingLaunchRequestedMs;
+	QString mCurrentStatsItemKey;
+	QString mPendingGameStatsItemKey;
+	QString mActiveGameStatsItemKey;
 
 	int mThemeMode;
 	QString mThemeProfileId;
@@ -323,6 +420,7 @@ protected:
 	QString mFolderName;
 	QString mType;
 	QStringList mTags;
+	bool mWorkshopUploadInFlight;
 	bool mPostUploadSteamSyncPending;
 
 	QString mGamePath;

@@ -2,6 +2,7 @@
 *
 * Copyright 2016 Activision Publishing, Inc.
 *
+			UpdateBuildActionButtons();
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
@@ -29,7 +30,6 @@
 #pragma comment(lib, "steam_api64.lib")
 
 const int AppId = 311210;
-
 const char* gLanguages[] = { "english", "french", "italian", "spanish", "german", "portuguese", "russian", "polish", "japanese", "traditionalchinese", "simplifiedchinese", "englisharabic" };
 const char* gTags[] = { "Animation", "Audio", "Character", "Map", "Mod", "Mode", "Model", "Multiplayer", "Scorestreak", "Skin", "Specialist", "Texture", "UI", "Vehicle", "Visual Effect", "Weapon", "WIP", "Zombies" };
 dvar_s gDvars[] = {
@@ -43,6 +43,23 @@ dvar_s gDvars[] = {
 					{"splitscreen", "Enable splitscreen", DVAR_VALUE_BOOL},
 					{"splitscreen_playerCount", "Allocate the number of instances for splitscreen", DVAR_VALUE_INT, 0, 2}
 				 };
+static const char* kLauncherVersion = "1.0.3";
+// Point these at the repo that publishes the launcher ZIP asset users should install.
+static const char* kLauncherReleaseApiUrl = "https://api.github.com/repos/Sphynxmods/BO3-Mod-Tools-Black/releases/latest";
+static const char* kLauncherReleasesUrl = "https://github.com/Sphynxmods/BO3-Mod-Tools-Black/releases";
+
+static QString CleanVersionText(QString VersionText)
+{
+	VersionText = VersionText.trimmed();
+	if (VersionText.startsWith('v', Qt::CaseInsensitive))
+		VersionText.remove(0, 1);
+	return VersionText;
+}
+
+static QVersionNumber VersionNumberFromText(const QString& VersionText)
+{
+	return QVersionNumber::fromString(CleanVersionText(VersionText));
+}
 
 enum ThemeModeValue
 {
@@ -50,6 +67,426 @@ enum ThemeModeValue
 	ThemeOriginalClassic,
 	ThemeDarkModern
 };
+
+static QStringList StartupQuotes()
+{
+	return QStringList()
+		<< "Today, you're going to achieve greatness. Greatness starts with something small."
+		<< "You can do it. One step at a time."
+		<< "Small progress is still progress."
+		<< "Start small. Finish strong."
+		<< "Momentum beats hesitation."
+		<< "Build the next piece. Then the next one."
+		<< "Today is a good day to make something better.";
+}
+
+static QString RandomStartupQuote()
+{
+	const QStringList Quotes = StartupQuotes();
+	if (Quotes.isEmpty())
+		return QString();
+	return Quotes.at(QRandomGenerator::global()->bounded(Quotes.count()));
+}
+
+namespace
+{
+struct ToolbarItemConfig
+{
+	QString Key;
+	QString Label;
+	QString IconPath;
+	QString BuiltInActionKey;
+	QString FunctionScript;
+	bool BuiltIn;
+	bool Hidden;
+};
+
+struct ToolbarBuiltinSpec
+{
+	const char* Key;
+	const char* Label;
+	bool HiddenByDefault;
+};
+
+static const ToolbarBuiltinSpec kToolbarBuiltinSpecs[] =
+{
+	{ "file-new", "New", false },
+	{ "file-open-root", "Open Root", true },
+	{ "file-open-console-log", "Open console_mp.log", true },
+	{ "file-open-console-log-editor", "Open console_mp.log (Editor)", true },
+	{ "help-script-reference", "BO3 Script Reference", true },
+	{ "edit-build", "Build", false },
+	{ "edit-analyze", "Analyze", false },
+	{ "edit-information", "Information", false },
+	{ "edit-ready-for-publish", "Publish Check", false },
+	{ "edit-publish", "Publish", false },
+	{ "file-asset-editor", "Asset Editor", false },
+	{ "file-level-editor", "Radiant", false },
+	{ "file-export2bin", "Export2Bin", true },
+	{ "extra-tools-menu", "Extra Tools", false }
+};
+
+static const int kToolbarSchemaVersion = 3;
+
+static QString BuiltInActionKeyForSlot(const QString& Key)
+{
+	QString NormalizedKey = Key.trimmed().toLower();
+	if (NormalizedKey == "plugins-menu")
+		NormalizedKey = "extra-tools-menu";
+	return NormalizedKey;
+}
+
+static QList<ToolbarItemConfig> DefaultToolbarItems()
+{
+	QList<ToolbarItemConfig> Items;
+	const QStringList DefaultOrder = QStringList()
+		<< "file-new"
+		<< "edit-build"
+		<< "edit-analyze"
+		<< "edit-information"
+		<< "edit-ready-for-publish"
+		<< "edit-publish"
+		<< "file-asset-editor"
+		<< "file-level-editor"
+		<< "extra-tools-menu";
+
+	for (const QString& BuiltinKey : DefaultOrder)
+	{
+		const ToolbarBuiltinSpec* SpecPtr = NULL;
+		for (const ToolbarBuiltinSpec& Candidate : kToolbarBuiltinSpecs)
+		{
+			if (QString::fromLatin1(Candidate.Key) == BuiltinKey)
+			{
+				SpecPtr = &Candidate;
+				break;
+			}
+		}
+		if (!SpecPtr)
+			continue;
+
+		ToolbarItemConfig Item;
+		Item.Key = BuiltInActionKeyForSlot(SpecPtr->Key);
+		Item.Label = QString::fromLatin1(SpecPtr->Label);
+		Item.BuiltInActionKey = Item.Key;
+		Item.BuiltIn = true;
+		Item.Hidden = SpecPtr->HiddenByDefault;
+		Items.append(Item);
+	}
+	return Items;
+}
+
+static QString ToolbarIconResourcePath(const QString& BuiltInActionKey, bool LegacyIcons)
+{
+	const QString Key = BuiltInActionKey.trimmed().toLower();
+	if (Key == "file-new")
+		return LegacyIcons ? ":/resources/FileNew.png" : ":/resources/new-mapmod.png";
+	if (Key == "edit-build")
+		return LegacyIcons ? ":/resources/Go.png" : ":/resources/build.png";
+	if (Key == "edit-analyze")
+		return LegacyIcons ? ":/resources/Go.png" : ":/resources/diagnosis.png";
+	if (Key == "edit-ready-for-publish")
+		return LegacyIcons ? ":/resources/upload.png" : ":/resources/upload-check.png";
+	if (Key == "edit-publish")
+		return ":/resources/upload.png";
+	if (Key == "file-asset-editor")
+		return ":/resources/AssetEditor.png";
+	if (Key == "file-level-editor")
+		return ":/resources/Radiant.png";
+	if (Key == "file-export2bin")
+		return LegacyIcons ? ":/resources/Export2Bin.png" : ":/resources/Export2Bin.png";
+	if (Key == "extra-tools-menu")
+		return ":/resources/toolkit.png";
+	if (Key == "file-open-root")
+		return QCoreApplication::applicationDirPath() + "/folderIcon.png";
+	if (Key == "help-script-reference")
+		return ":/resources/Export2Bin.png";
+	return QString();
+}
+
+static QIcon ToolbarIconForActionKey(const QString& BuiltInActionKey)
+{
+	const bool LegacyIcons = QSettings().value("UseLegacyToolbarIcons", false).toBool();
+	const QString ResourcePath = ToolbarIconResourcePath(BuiltInActionKey, LegacyIcons);
+	if (ResourcePath.isEmpty())
+		return QIcon();
+	if (ResourcePath.endsWith(".png", Qt::CaseInsensitive) || ResourcePath.endsWith(".ico", Qt::CaseInsensitive))
+		return QIcon(ResourcePath);
+	return QIcon(QDir::toNativeSeparators(ResourcePath));
+}
+
+static ToolbarItemConfig ToolbarItemFromMap(const QVariantMap& Map)
+{
+	ToolbarItemConfig Item;
+	Item.Key = Map.value("Key").toString().trimmed();
+	Item.Label = Map.value("Label").toString().trimmed();
+	Item.IconPath = Map.value("IconPath").toString().trimmed();
+	Item.BuiltInActionKey = BuiltInActionKeyForSlot(Map.value("BuiltInActionKey").toString());
+	Item.FunctionScript = Map.value("FunctionScript").toString();
+	Item.BuiltIn = Map.value("BuiltIn", false).toBool();
+	Item.Hidden = Map.value("Hidden", false).toBool();
+	if (Item.Key.isEmpty())
+		Item.Key = Item.BuiltIn ? Item.BuiltInActionKey : Item.Label;
+	if (Item.Key.compare("plugins-menu", Qt::CaseInsensitive) == 0)
+		Item.Key = "extra-tools-menu";
+	if (Item.Label.isEmpty())
+		Item.Label = Item.BuiltIn ? Item.BuiltInActionKey : QObject::tr("Custom Item");
+	if (Item.BuiltInActionKey.isEmpty() && Item.BuiltIn)
+		Item.BuiltInActionKey = BuiltInActionKeyForSlot(Item.Key);
+	if (Item.BuiltIn)
+		Item.BuiltInActionKey = BuiltInActionKeyForSlot(Item.BuiltInActionKey);
+	return Item;
+}
+
+static QVariantMap ToolbarItemToMap(const ToolbarItemConfig& Item)
+{
+	QVariantMap Map;
+	Map.insert("Key", Item.Key);
+	Map.insert("Label", Item.Label);
+	Map.insert("IconPath", Item.IconPath);
+	Map.insert("BuiltInActionKey", Item.BuiltInActionKey);
+	Map.insert("FunctionScript", Item.FunctionScript);
+	Map.insert("BuiltIn", Item.BuiltIn);
+	Map.insert("Hidden", Item.Hidden);
+	return Map;
+}
+
+static QList<ToolbarItemConfig> LoadToolbarItems()
+{
+	QSettings Settings;
+	QList<ToolbarItemConfig> Items;
+	Settings.beginGroup("Toolbar");
+	const int SavedSchemaVersion = Settings.value("SchemaVersion", 0).toInt();
+	if (SavedSchemaVersion < kToolbarSchemaVersion)
+	{
+		Settings.endGroup();
+		return DefaultToolbarItems();
+	}
+	const int Count = Settings.beginReadArray("Items");
+	for (int Index = 0; Index < Count; Index++)
+	{
+		Settings.setArrayIndex(Index);
+		Items.append(ToolbarItemFromMap(Settings.value("Entry").toMap()));
+	}
+	Settings.endArray();
+	Settings.endGroup();
+	if (Items.isEmpty())
+		Items = DefaultToolbarItems();
+
+	bool HasExtraToolsMenu = false;
+	for (ToolbarItemConfig& Item : Items)
+	{
+		if (!Item.BuiltIn)
+			continue;
+		Item.BuiltInActionKey = BuiltInActionKeyForSlot(Item.BuiltInActionKey);
+		if (Item.Key.compare("plugins-menu", Qt::CaseInsensitive) == 0)
+			Item.Key = "extra-tools-menu";
+		if (Item.BuiltInActionKey == "extra-tools-menu")
+		{
+			HasExtraToolsMenu = true;
+			if (Item.Label.trimmed().isEmpty() || Item.Label.compare("Plugins", Qt::CaseInsensitive) == 0)
+				Item.Label = "Extra Tools";
+		}
+	}
+
+	if (!HasExtraToolsMenu)
+	{
+		ToolbarItemConfig ExtraToolsItem;
+		ExtraToolsItem.Key = "extra-tools-menu";
+		ExtraToolsItem.Label = "Extra Tools";
+		ExtraToolsItem.BuiltInActionKey = "extra-tools-menu";
+		ExtraToolsItem.BuiltIn = true;
+		ExtraToolsItem.Hidden = false;
+		Items.append(ExtraToolsItem);
+	}
+	return Items;
+}
+
+static void SaveToolbarItems(const QList<ToolbarItemConfig>& Items)
+{
+	QSettings Settings;
+	Settings.beginGroup("Toolbar");
+	Settings.setValue("SchemaVersion", kToolbarSchemaVersion);
+	Settings.beginWriteArray("Items");
+	for (int Index = 0; Index < Items.count(); Index++)
+	{
+		Settings.setArrayIndex(Index);
+		Settings.setValue("Entry", ToolbarItemToMap(Items[Index]));
+	}
+	Settings.endArray();
+	Settings.endGroup();
+}
+
+static QAction* FindBuiltinToolbarAction(mlMainWindow* Window, const QString& BuiltInActionKey)
+{
+	const QString NormalizedKey = BuiltInActionKey.trimmed().toLower();
+	return Window ? Window->findChild<QAction*>(NormalizedKey) : NULL;
+}
+
+static bool TriggerBuiltinToolbarAction(mlMainWindow* Window, const QString& BuiltInActionKey)
+{
+	QAction* Action = FindBuiltinToolbarAction(Window, BuiltInActionKey);
+	if (!Action)
+		return false;
+	Action->trigger();
+	return true;
+}
+
+static void OpenPathWithDefaultApp(const QString& Path)
+{
+	if (!Path.trimmed().isEmpty())
+		QDesktopServices::openUrl(QUrl::fromLocalFile(QDir::toNativeSeparators(Path)));
+}
+
+static bool ExecuteToolbarScript(mlMainWindow* Window, const QString& Script)
+{
+	QString CleanScript = Script;
+	CleanScript.replace('\r', '\n');
+	const QStringList Lines = CleanScript.split('\n', Qt::SkipEmptyParts);
+	for (QString Line : Lines)
+	{
+		Line = Line.trimmed();
+		if (Line.isEmpty() || Line.startsWith('#'))
+			continue;
+
+		const QString LowerLine = Line.toLower();
+		if (LowerLine.startsWith("builtin:"))
+		{
+			const QString BuiltInKey = Line.mid(QStringLiteral("builtin:").length()).trimmed();
+			if (!TriggerBuiltinToolbarAction(Window, BuiltInKey))
+				QMessageBox::warning(Window, "Toolbar Item", QString("Unknown built-in toolbar command: %1").arg(BuiltInKey));
+			continue;
+		}
+
+		if (LowerLine.startsWith("url:"))
+		{
+			const QString UrlText = Line.mid(QStringLiteral("url:").length()).trimmed();
+			if (!UrlText.isEmpty())
+				QDesktopServices::openUrl(QUrl(UrlText));
+			continue;
+		}
+
+		if (LowerLine.startsWith("file:"))
+		{
+			OpenPathWithDefaultApp(Line.mid(QStringLiteral("file:").length()).trimmed());
+			continue;
+		}
+
+		if (LowerLine.startsWith("folder:"))
+		{
+			OpenPathWithDefaultApp(Line.mid(QStringLiteral("folder:").length()).trimmed());
+			continue;
+		}
+
+		if (LowerLine.startsWith("exe:"))
+			Line = Line.mid(QStringLiteral("exe:").length()).trimmed();
+
+		const QStringList CommandParts = QProcess::splitCommand(Line);
+		if (CommandParts.isEmpty())
+			continue;
+
+		const QString Program = CommandParts[0];
+		QStringList Arguments = CommandParts.mid(1);
+		if (!QFileInfo(Program).exists() && !Program.contains('.') && !Line.contains(' '))
+		{
+			QMessageBox::warning(Window, "Toolbar Item", QString("Unable to launch '%1'.").arg(Program));
+			continue;
+		}
+
+		if (!QProcess::startDetached(Program, Arguments))
+		{
+			QMessageBox::warning(Window, "Toolbar Item", QString("Unable to launch '%1'.").arg(Program));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static QString ResolveConsoleLogPath(const QString& GamePath, QTreeWidgetItem* ActiveItem)
+{
+	Q_UNUSED(ActiveItem);
+	if (GamePath.trimmed().isEmpty())
+		return QString();
+
+	QStringList Candidates;
+	Candidates << QDir::cleanPath(QString("%1/players/console_mp.log").arg(GamePath));
+	Candidates << QDir::cleanPath(QString("%1/main/console_mp.log").arg(GamePath));
+	Candidates << QDir::cleanPath(QString("%1/console_mp.log").arg(GamePath));
+
+	for (const QString& Candidate : Candidates)
+	{
+		if (QFileInfo(Candidate).isFile())
+			return Candidate;
+	}
+
+	return Candidates.isEmpty() ? QString() : Candidates.first();
+}
+
+static void ShowTextFileDialog(QWidget* Parent, const QString& FilePath, const QString& Title)
+{
+	QFile File(FilePath);
+	if (!File.open(QIODevice::ReadOnly | QIODevice::Text))
+	{
+		QMessageBox::warning(Parent, Title, QString("Unable to open:\n%1").arg(QDir::toNativeSeparators(FilePath)));
+		return;
+	}
+
+	QDialog Dialog(Parent);
+	Dialog.setWindowTitle(Title);
+	Dialog.resize(980, 720);
+	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+	QPlainTextEdit* Viewer = new QPlainTextEdit(&Dialog);
+	Viewer->setReadOnly(true);
+	Viewer->setLineWrapMode(QPlainTextEdit::NoWrap);
+	Viewer->setPlainText(QString::fromUtf8(File.readAll()));
+	Layout->addWidget(Viewer, 1);
+	QDialogButtonBox* Buttons = new QDialogButtonBox(QDialogButtonBox::Close, &Dialog);
+	QObject::connect(Buttons, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	Layout->addWidget(Buttons);
+	Dialog.exec();
+}
+
+static QString NormalizeCategoryTabKey(const QString& RawKey)
+{
+	const QString Key = RawKey.trimmed().toLower();
+	if (Key == "all")
+		return "all";
+	if (Key == "recent" || Key == "recents")
+		return "recent";
+	if (Key == "favorite" || Key == "favorites")
+		return "favorites";
+	if (Key == "zm" || Key == "zm maps" || Key == "zm_maps" || Key == "zmmaps" || Key == "zm-maps")
+		return "zm-maps";
+	if (Key == "mp" || Key == "mp maps" || Key == "mp_maps" || Key == "mpmaps" || Key == "mp-maps")
+		return "mp-maps";
+	if (Key == "mod" || Key == "mods")
+		return "mods";
+	return Key;
+}
+
+static QString CurrentCategoryTabKey(const QTabBar* Tabs)
+{
+	if (!Tabs || Tabs->currentIndex() < 0)
+		return "all";
+	const QString DataKey = NormalizeCategoryTabKey(Tabs->tabData(Tabs->currentIndex()).toString());
+	if (!DataKey.isEmpty())
+		return DataKey;
+	return NormalizeCategoryTabKey(Tabs->tabText(Tabs->currentIndex()));
+}
+
+static int FindCategoryTabIndex(const QTabBar* Tabs, const QString& CategoryKey)
+{
+	if (!Tabs)
+		return -1;
+	const QString NormalizedKey = NormalizeCategoryTabKey(CategoryKey);
+	for (int TabIdx = 0; TabIdx < Tabs->count(); TabIdx++)
+	{
+		if (NormalizeCategoryTabKey(Tabs->tabData(TabIdx).toString()) == NormalizedKey)
+			return TabIdx;
+	}
+	return -1;
+}
+}
 
 static QString ThemeModeToSettingsValue(int ThemeModeValue)
 {
@@ -103,6 +540,585 @@ static int TreeRowHeightForTheme(int ThemeModeValue, bool CompactRow)
 	return CompactRow ? 36 : 46;
 }
 
+static quint64 DirectorySizeBytes(const QString& RootPath)
+{
+	QFileInfo RootInfo(RootPath);
+	if (!RootInfo.exists())
+		return 0;
+	if (RootInfo.isFile())
+		return static_cast<quint64>(RootInfo.size());
+
+	quint64 TotalBytes = 0;
+	QDirIterator Iterator(RootPath, QDir::Files | QDir::NoSymLinks | QDir::Hidden, QDirIterator::Subdirectories);
+	while (Iterator.hasNext())
+	{
+		Iterator.next();
+		TotalBytes += static_cast<quint64>(Iterator.fileInfo().size());
+	}
+	return TotalBytes;
+}
+
+static QString FormatDataSizeBytes(quint64 Bytes)
+{
+	const double ByteCount = static_cast<double>(Bytes);
+	if (ByteCount >= 1024.0 * 1024.0 * 1024.0)
+		return QString("%1 GB").arg(ByteCount / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+	if (ByteCount >= 1024.0 * 1024.0)
+		return QString("%1 MB").arg(ByteCount / (1024.0 * 1024.0), 0, 'f', 1);
+	if (ByteCount >= 1024.0)
+		return QString("%1 KB").arg(ByteCount / 1024.0, 0, 'f', 1);
+	return QString("%1 B").arg(Bytes);
+}
+
+static void AppendStartupTrace(const QString& Message)
+{
+	if (!qEnvironmentVariableIsSet("ML_STARTUP_TRACE"))
+		return;
+
+	QFile TraceFile(QDir::cleanPath(QDir::tempPath() + "/ModLauncher_custom_startup.log"));
+	if (!TraceFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+		return;
+
+	QTextStream Stream(&TraceFile);
+	Stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) << "Z " << Message << '\n';
+}
+
+static QString DefaultDisplayNameForEntryName(const QString& Name)
+{
+	QString DisplayName = Name.trimmed();
+	DisplayName.replace('_', ' ');
+	DisplayName.replace('-', ' ');
+	DisplayName = DisplayName.simplified();
+	if (DisplayName.isEmpty())
+		DisplayName = "No Map";
+	return DisplayName;
+}
+
+static QString DefaultDisplayColorForEntryName(const QString& Name, bool IsMap)
+{
+	const uint HashValue = qHash(Name.toLower());
+	const int Hue = static_cast<int>(HashValue % 360);
+	const int Saturation = IsMap ? 180 : 150;
+	const int Lightness = IsMap ? 175 : 160;
+	return QColor::fromHsl(Hue, Saturation, Lightness).name();
+}
+
+static bool IsPowerOfTwoDimension(int Value)
+{
+	return Value > 0 && (Value & (Value - 1)) == 0;
+}
+
+class QuickLaunchPicker : public QWidget
+{
+public:
+	struct Entry
+	{
+		QString Category;
+		QString Label;
+		QString Code;
+		QString Detail;
+		QString SearchKey;
+		QString WorkshopId;
+	};
+
+	QuickLaunchPicker(QWidget* Parent = NULL)
+		: QWidget(Parent)
+		, mButton(new QToolButton(this))
+		, mPopup(new QFrame(NULL, Qt::Popup))
+		, mSearchEdit(new QLineEdit(mPopup))
+		, mTabs(new QTabBar(mPopup))
+		, mListWidget(new QListWidget(mPopup))
+		, mSelectedIndex(-1)
+		, mBatchUpdateDepth(0)
+		, mEntriesLoaded(false)
+		, mWorkshopEntriesLoaded(false)
+		, mButtonHeight(34)
+		, mPopupHeight(340)
+	{
+		QHBoxLayout* Layout = new QHBoxLayout(this);
+		Layout->setContentsMargins(0, 0, 0, 0);
+		Layout->setSpacing(0);
+
+		mButton->setObjectName("QuickLaunchButton");
+		mButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+		mButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		mButton->setCursor(Qt::PointingHandCursor);
+		mButton->setText("No Map");
+		Layout->addWidget(mButton);
+
+		mPopup->setObjectName("QuickLaunchPopup");
+		mPopup->setAttribute(Qt::WA_DeleteOnClose, false);
+		mPopup->setMinimumWidth(560);
+		mPopup->setMinimumHeight(mPopupHeight);
+		QVBoxLayout* PopupLayout = new QVBoxLayout(mPopup);
+		PopupLayout->setContentsMargins(10, 10, 10, 10);
+		PopupLayout->setSpacing(8);
+
+		QHBoxLayout* SearchLayout = new QHBoxLayout();
+		SearchLayout->setContentsMargins(0, 0, 0, 0);
+		SearchLayout->setSpacing(8);
+		mSearchEdit->setObjectName("QuickLaunchSearch");
+		mSearchEdit->setPlaceholderText("Search maps, IDs, or codes...");
+		mSearchEdit->setClearButtonEnabled(true);
+		SearchLayout->addWidget(mSearchEdit, 1);
+		QToolButton* NoMapButton = new QToolButton(mPopup);
+		NoMapButton->setText("No Map");
+		NoMapButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+		NoMapButton->setCursor(Qt::PointingHandCursor);
+		NoMapButton->setAutoRaise(true);
+		SearchLayout->addWidget(NoMapButton);
+		PopupLayout->addLayout(SearchLayout);
+
+		mTabs->setObjectName("QuickLaunchTabs");
+		mTabs->setDocumentMode(true);
+		mTabs->setDrawBase(false);
+		mTabs->setExpanding(false);
+		PopupLayout->addWidget(mTabs);
+
+		mListWidget->setObjectName("QuickLaunchList");
+		mListWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+		mListWidget->setAlternatingRowColors(false);
+		mListWidget->setUniformItemSizes(false);
+		mListWidget->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+		PopupLayout->addWidget(mListWidget, 1);
+
+		connect(mButton, &QToolButton::clicked, this, [=]()
+		{
+			if (mPopup->isVisible())
+				mPopup->hide();
+			else
+				ShowPopup();
+		});
+		connect(NoMapButton, &QToolButton::clicked, this, [=]()
+		{
+			for (int EntryIndex = 0; EntryIndex < mEntries.count(); ++EntryIndex)
+			{
+				const Entry& Item = mEntries[EntryIndex];
+				if (Item.Label.compare("No Map", Qt::CaseInsensitive) == 0 && Item.Code.isEmpty())
+				{
+					SelectIndex(EntryIndex, true);
+					mPopup->hide();
+					return;
+				}
+			}
+			SelectIndex(-1, true);
+			mPopup->hide();
+		});
+		connect(mTabs, &QTabBar::currentChanged, this, [=](int)
+		{
+			if (mTabs->currentIndex() >= 0 && mTabs->tabData(mTabs->currentIndex()).toString() == "Workshop")
+			{
+				const bool NeedsWorkshopLoad = !mWorkshopEntriesLoaded;
+				QTimer::singleShot(0, this, [this, NeedsWorkshopLoad]()
+				{
+					if (NeedsWorkshopLoad)
+						EnsureWorkshopEntriesLoaded();
+					else if (mPopup->isVisible())
+						RefreshList();
+				});
+				return;
+			}
+			RefreshList();
+		});
+		connect(mListWidget, &QListWidget::itemClicked, this, [=](QListWidgetItem* Item)
+		{
+			if (!Item)
+				return;
+			SelectIndex(Item->data(Qt::UserRole).toInt(), true);
+			mPopup->hide();
+		});
+		connect(mListWidget, &QListWidget::itemDoubleClicked, this, [=](QListWidgetItem* Item)
+		{
+			if (!Item)
+				return;
+			SelectIndex(Item->data(Qt::UserRole).toInt(), true);
+			mPopup->hide();
+		});
+
+		SetControlHeights(mButtonHeight, mPopupHeight);
+		EnsureTabs();
+		UpdateButtonText();
+	}
+
+	void BeginBatchUpdate()
+	{
+		mBatchUpdateDepth++;
+	}
+
+	void EndBatchUpdate()
+	{
+		if (mBatchUpdateDepth <= 0)
+			return;
+
+		mBatchUpdateDepth--;
+		if (mBatchUpdateDepth == 0)
+		{
+			EnsureTabs();
+			UpdateButtonText();
+			if (mPopup->isVisible())
+				RefreshList();
+		}
+	}
+
+	void AddEntry(const QString& Category, const QString& Label, const QString& Code, const QString& Detail = QString(), const QString& WorkshopId = QString())
+	{
+		Entry NewEntry;
+		NewEntry.Category = Category.trimmed().isEmpty() ? "General" : Category.trimmed();
+		NewEntry.Label = Label.trimmed().isEmpty() ? Code.trimmed() : Label.trimmed();
+		NewEntry.Code = Code.trimmed();
+		NewEntry.Detail = Detail.trimmed();
+		NewEntry.WorkshopId = WorkshopId.trimmed();
+		NewEntry.SearchKey = QString("%1 %2 %3 %4 %5").arg(NewEntry.Category, NewEntry.Label, NewEntry.Code, NewEntry.Detail, NewEntry.WorkshopId).toLower();
+		mEntries.append(NewEntry);
+		if (mSelectedIndex < 0)
+			mSelectedIndex = 0;
+		if (mBatchUpdateDepth > 0)
+			return;
+		EnsureTabs();
+		UpdateButtonText();
+		if (mPopup->isVisible())
+			RefreshList();
+	}
+
+	void SetSelectionChangedHandler(const std::function<void(const QString&, const QString&)>& Handler)
+	{
+		mSelectionChangedHandler = Handler;
+	}
+
+	void SetPopulateEntriesHandler(const std::function<void()>& Handler)
+	{
+		mPopulateEntriesHandler = Handler;
+	}
+
+	void SetPopulateWorkshopEntriesHandler(const std::function<void()>& Handler)
+	{
+		mPopulateWorkshopEntriesHandler = Handler;
+	}
+
+	void SetControlHeights(int ButtonHeight, int PopupHeight)
+	{
+		mButtonHeight = qMax(30, ButtonHeight);
+		mPopupHeight = qMax(300, PopupHeight);
+		setMinimumHeight(mButtonHeight);
+		setMaximumHeight(mButtonHeight);
+		setMinimumWidth(0);
+		mButton->setMinimumHeight(mButtonHeight);
+		mButton->setMaximumHeight(mButtonHeight);
+		mButton->setMinimumWidth(0);
+		mPopup->setMinimumHeight(mPopupHeight);
+		mPopup->resize(qMax(width(), 560), mPopupHeight);
+	}
+
+	QString currentCode() const
+	{
+		return (mSelectedIndex >= 0 && mSelectedIndex < mEntries.count()) ? mEntries[mSelectedIndex].Code : QString();
+	}
+
+	QString currentWorkshopId() const
+	{
+		return (mSelectedIndex >= 0 && mSelectedIndex < mEntries.count()) ? mEntries[mSelectedIndex].WorkshopId : QString();
+	}
+
+	bool IsWorkshopSelection() const
+	{
+		return mSelectedIndex >= 0 && mSelectedIndex < mEntries.count() && mEntries[mSelectedIndex].Category == "Workshop";
+	}
+
+	void EnsureEntriesLoaded()
+	{
+		if (mEntriesLoaded || !mPopulateEntriesHandler)
+			return;
+
+		mEntriesLoaded = true;
+		mPopulateEntriesHandler();
+	}
+
+	void EnsureWorkshopEntriesLoaded()
+	{
+		if (mWorkshopEntriesLoaded || !mPopulateWorkshopEntriesHandler)
+			return;
+
+		mWorkshopEntriesLoaded = true;
+		mPopulateWorkshopEntriesHandler();
+	}
+
+private:
+	void EnsureTabs()
+	{
+		QString CurrentCategory = mTabs->currentIndex() >= 0 ? mTabs->tabData(mTabs->currentIndex()).toString() : QString("All");
+		QStringList Categories = QStringList() << "Zombies" << "MP" << "Campaign/Freerun/Nightmare";
+		for (const Entry& Item : mEntries)
+		{
+			if (Item.Category.compare("Workshop", Qt::CaseInsensitive) == 0)
+			{
+				Categories << "Workshop";
+				break;
+			}
+		}
+		Categories << "All";
+		QSignalBlocker TabsSignalBlocker(mTabs);
+		while (mTabs->count() > 0)
+			mTabs->removeTab(0);
+		for (const QString& Category : Categories)
+		{
+			const int TabIndex = mTabs->addTab(Category);
+			mTabs->setTabData(TabIndex, Category);
+		}
+		for (int TabIndex = 0; TabIndex < mTabs->count(); ++TabIndex)
+		{
+			if (mTabs->tabData(TabIndex).toString() == CurrentCategory)
+			{
+				mTabs->setCurrentIndex(TabIndex);
+				return;
+			}
+		}
+		mTabs->setCurrentIndex(0);
+	}
+
+	void RefreshList()
+	{
+		mListWidget->clear();
+		const QString SelectedCategory = mTabs->currentIndex() >= 0 ? mTabs->tabData(mTabs->currentIndex()).toString() : QString("All");
+		const QString SearchText = mSearchEdit->text().trimmed().toLower();
+		for (int EntryIndex = 0; EntryIndex < mEntries.count(); ++EntryIndex)
+		{
+			const Entry& Item = mEntries[EntryIndex];
+			if (SelectedCategory != "All" && Item.Category != SelectedCategory)
+				continue;
+			if (!SearchText.isEmpty() && !Item.SearchKey.contains(SearchText))
+				continue;
+
+			QString ItemText = Item.Label;
+			if (!Item.Code.isEmpty() && Item.Label.compare("No Map", Qt::CaseInsensitive) != 0)
+				ItemText += QString(" (%1)").arg(Item.Code);
+			QListWidgetItem* ListItem = new QListWidgetItem(ItemText, mListWidget);
+			ListItem->setData(Qt::UserRole, EntryIndex);
+			ListItem->setToolTip(Item.Detail.isEmpty() ? Item.Code : QString("%1\n%2").arg(Item.Code, Item.Detail));
+			ListItem->setSizeHint(QSize(0, 24));
+			if (EntryIndex == mSelectedIndex)
+				mListWidget->setCurrentItem(ListItem);
+		}
+	}
+
+	void SelectIndex(int EntryIndex, bool Notify)
+	{
+		if (EntryIndex < 0 || EntryIndex >= mEntries.count())
+			return;
+		mSelectedIndex = EntryIndex;
+		UpdateButtonText();
+		if (mPopup->isVisible())
+			RefreshList();
+		if (Notify && mSelectionChangedHandler)
+			mSelectionChangedHandler(mEntries[EntryIndex].Code, mEntries[EntryIndex].WorkshopId);
+	}
+
+	void ShowPopup()
+	{
+		EnsureEntriesLoaded();
+		const QPoint GlobalBottomLeft = mapToGlobal(QPoint(0, height()));
+		QScreen* PopupScreen = screen();
+		if (!PopupScreen && window() && window()->windowHandle())
+			PopupScreen = window()->windowHandle()->screen();
+		if (!PopupScreen)
+			PopupScreen = QGuiApplication::primaryScreen();
+		const QRect AvailableGeometry = PopupScreen ? PopupScreen->availableGeometry() : QRect(GlobalBottomLeft, QSize(1280, 720));
+		const int PopupWidth = qMax(width() + 90, 560);
+		const int PopupHeight = qMax(220, qMin(mPopupHeight, AvailableGeometry.height() - 40));
+		QPoint PopupPosition = GlobalBottomLeft;
+		if (PopupPosition.x() + PopupWidth > AvailableGeometry.right())
+			PopupPosition.setX(qMax(AvailableGeometry.left(), AvailableGeometry.right() - PopupWidth));
+		if (PopupPosition.y() + PopupHeight > AvailableGeometry.bottom())
+			PopupPosition.setY(qMax(AvailableGeometry.top(), mapToGlobal(QPoint(0, 0)).y() - PopupHeight));
+		mPopup->setGeometry(QRect(PopupPosition, QSize(PopupWidth, PopupHeight)));
+		mPopup->show();
+		mSearchEdit->setFocus();
+		mSearchEdit->selectAll();
+		RefreshList();
+	}
+
+	void UpdateButtonText()
+	{
+		const QString Label = (mSelectedIndex >= 0 && mSelectedIndex < mEntries.count()) ? mEntries[mSelectedIndex].Label : QString("No Map");
+		mButton->setText(Label);
+		mButton->setToolTip(Label);
+	}
+
+	QToolButton* mButton;
+	QFrame* mPopup;
+	QLineEdit* mSearchEdit;
+	QTabBar* mTabs;
+	QListWidget* mListWidget;
+	QList<Entry> mEntries;
+	std::function<void(const QString&, const QString&)> mSelectionChangedHandler;
+	std::function<void()> mPopulateEntriesHandler;
+	std::function<void()> mPopulateWorkshopEntriesHandler;
+	int mSelectedIndex;
+	int mBatchUpdateDepth;
+	bool mEntriesLoaded;
+	bool mWorkshopEntriesLoaded;
+	int mButtonHeight;
+	int mPopupHeight;
+};
+
+void mlMainWindow::PopulateQuickLaunchEntries()
+{
+	if (!mQuickLaunchWidget)
+		return;
+
+	AppendStartupTrace("quick-launch:populate-start");
+	mQuickLaunchWidget->BeginBatchUpdate();
+	auto AddQuickLaunchEntry = [this](const QString& Category, const QString& Label, const QString& Code, const QString& Detail = QString(), const QString& WorkshopId = QString())
+	{
+		mQuickLaunchWidget->AddEntry(Category, Label, Code, Detail, WorkshopId);
+	};
+	AddQuickLaunchEntry("General", "No Map", "");
+	AddQuickLaunchEntry("Zombies", "Shadows of Evil", "zm_zod");
+	AddQuickLaunchEntry("Zombies", "Der Eisendrache", "zm_castle");
+	AddQuickLaunchEntry("Zombies", "Zetsubou No Shima", "zm_island");
+	AddQuickLaunchEntry("Zombies", "Gorod Krovi", "zm_stalingrad");
+	AddQuickLaunchEntry("Zombies", "Revelations", "zm_genesis");
+	AddQuickLaunchEntry("Zombies", "Nacht der Untoten", "zm_prototype");
+	AddQuickLaunchEntry("Zombies", "Verruckt", "zm_asylum");
+	AddQuickLaunchEntry("Zombies", "Shi No Numa", "zm_sumpf");
+	AddQuickLaunchEntry("Zombies", "Kino der Toten", "zm_theater");
+	AddQuickLaunchEntry("Zombies", "Ascension", "zm_cosmodrome");
+	AddQuickLaunchEntry("Zombies", "Shangri-La", "zm_temple");
+	AddQuickLaunchEntry("Zombies", "Moon", "zm_moon");
+	AddQuickLaunchEntry("Zombies", "Origins", "zm_tomb");
+	AddQuickLaunchEntry("Zombies", "Dead Ops Arcade 2", "cp_doa_bo3");
+	AddQuickLaunchEntry("MP", "Aquarium", "mp_biodome");
+	AddQuickLaunchEntry("MP", "Breach", "mp_spire");
+	AddQuickLaunchEntry("MP", "Combine", "mp_sector");
+	AddQuickLaunchEntry("MP", "Evac", "mp_apartments");
+	AddQuickLaunchEntry("MP", "Exodus", "mp_chinatown");
+	AddQuickLaunchEntry("MP", "Fringe", "mp_veiled");
+	AddQuickLaunchEntry("MP", "Havoc", "mp_havoc");
+	AddQuickLaunchEntry("MP", "Hunted", "mp_ethiopia");
+	AddQuickLaunchEntry("MP", "Infection", "mp_infection");
+	AddQuickLaunchEntry("MP", "Metro", "mp_metro");
+	AddQuickLaunchEntry("MP", "Redwood", "mp_redwood");
+	AddQuickLaunchEntry("MP", "Stronghold", "mp_stonghold");
+	AddQuickLaunchEntry("MP", "Nuk3town", "mp_nuketown_x");
+	AddQuickLaunchEntry("MP", "Rise", "mp_rise");
+	AddQuickLaunchEntry("MP", "Splash", "mp_waterpark");
+	AddQuickLaunchEntry("MP", "Skyjacked", "mp_skyjacked");
+	AddQuickLaunchEntry("MP", "Gauntlet", "mp_crucible");
+	AddQuickLaunchEntry("MP", "Knockout", "mp_kung_fu");
+	AddQuickLaunchEntry("MP", "Rift", "mp_conduit");
+	AddQuickLaunchEntry("MP", "Spire", "mp_aerospace");
+	AddQuickLaunchEntry("MP", "Verge", "mp_banzai");
+	AddQuickLaunchEntry("MP", "Rumble", "mp_arena");
+	AddQuickLaunchEntry("MP", "Berserk", "mp_shrine");
+	AddQuickLaunchEntry("MP", "Cryogen", "mp_cryogen");
+	AddQuickLaunchEntry("MP", "Empire", "mp_rome");
+	AddQuickLaunchEntry("MP", "Micro", "mp_miniature");
+	AddQuickLaunchEntry("MP", "Rupture", "mp_city");
+	AddQuickLaunchEntry("MP", "Outlaw", "mp_western");
+	AddQuickLaunchEntry("MP", "Citadel", "mp_ruins");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Safehouse: Mobile", "cp_sh_mobile");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Safehouse: Singapore", "cp_sh_singapore");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Safehouse: Cairo", "cp_sh_cairo");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Black Ops", "cp_mi_eth_prologue");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "New World", "cp_mi_zurich_newworld");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "In Darkness", "cp_mi_sing_blackstation");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Provocation", "cp_mi_sing_biodomes");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Hypocenter", "cp_mi_sing_sgen");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Vengeance", "cp_mi_sing_vengeance");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Rise & Fall", "cp_mi_cairo_ramses");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Demon Within", "cp_mi_cairo_infection");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Sand Castle", "cp_mi_cairo_aquifer");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Lotus Towers", "cp_mi_cairo_lotus");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Life", "cp_mi_zurich_coalescence");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Freerun: Alpha", "mp_freerun_01");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Freerun: Sidewinder", "mp_freerun_02");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Freerun: Infected", "mp_freerun_03");
+	AddQuickLaunchEntry("Campaign/Freerun/Nightmare", "Freerun: Blackout", "mp_freerun_04");
+
+	mQuickLaunchWidget->EndBatchUpdate();
+	UpdateQuickLaunchVisibility();
+	AppendStartupTrace("quick-launch:populate-done");
+}
+
+void mlMainWindow::PopulateWorkshopQuickLaunchEntries()
+{
+	if (!mQuickLaunchWidget)
+		return;
+
+	AppendStartupTrace("quick-launch:workshop-populate-start");
+	mQuickLaunchWidget->BeginBatchUpdate();
+
+	QSet<QString> ExistingQuickLaunchCodes;
+	ExistingQuickLaunchCodes.insert(QString());
+	for (const QString& BaseMapCode : QStringList()
+		<< "zm_zod" << "zm_factory" << "zm_castle" << "zm_island" << "zm_stalingrad" << "zm_genesis" << "zm_prototype" << "zm_asylum"
+		<< "zm_sumpf" << "zm_theater" << "zm_cosmodrome" << "zm_temple" << "zm_moon" << "zm_tomb" << "cp_doa_bo3"
+		<< "mp_biodome" << "mp_spire" << "mp_sector" << "mp_apartments" << "mp_chinatown" << "mp_veiled" << "mp_havoc" << "mp_ethiopia"
+		<< "mp_infection" << "mp_metro" << "mp_redwood" << "mp_stonghold" << "mp_nuketown_x" << "mp_rise" << "mp_waterpark"
+		<< "mp_skyjacked" << "mp_crucible" << "mp_kung_fu" << "mp_conduit" << "mp_aerospace" << "mp_banzai" << "mp_arena"
+		<< "mp_shrine" << "mp_cryogen" << "mp_rome" << "mp_miniature" << "mp_city" << "mp_western" << "mp_ruins"
+		<< "cp_sh_mobile" << "cp_sh_singapore" << "cp_sh_cairo" << "cp_mi_eth_prologue" << "cp_mi_zurich_newworld"
+		<< "cp_mi_sing_blackstation" << "cp_mi_sing_biodomes" << "cp_mi_sing_sgen" << "cp_mi_sing_vengeance" << "cp_mi_cairo_ramses"
+		<< "cp_mi_cairo_infection" << "cp_mi_cairo_aquifer" << "cp_mi_cairo_lotus" << "cp_mi_zurich_coalescence"
+		<< "mp_freerun_01" << "mp_freerun_02" << "mp_freerun_03" << "mp_freerun_04")
+	{
+		ExistingQuickLaunchCodes.insert(BaseMapCode);
+	}
+
+	QDir WorkshopRoot(mGamePath);
+	if (WorkshopRoot.cdUp() && WorkshopRoot.cdUp())
+	{
+		const QString WorkshopMapsPath = QDir::cleanPath(QString("%1/workshop/content/%2").arg(WorkshopRoot.absolutePath()).arg(AppId));
+		QDir WorkshopMapsDir(WorkshopMapsPath);
+		if (WorkshopMapsDir.exists())
+		{
+			AppendStartupTrace(QString("quick-launch:workshop-scan-start path=%1").arg(WorkshopMapsPath));
+			QList<QPair<QString, QString>> WorkshopEntries;
+			const QStringList WorkshopIds = WorkshopMapsDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+			for (const QString& WorkshopId : WorkshopIds)
+			{
+				AppendStartupTrace(QString("quick-launch:workshop-item-start id=%1").arg(WorkshopId));
+				const QString WorkshopItemPath = QDir::cleanPath(QString("%1/%2").arg(WorkshopMapsPath, WorkshopId));
+				QString MapCode;
+				QString MapTitle;
+				QFile WorkshopJsonFile(QDir::cleanPath(QString("%1/workshop.json").arg(WorkshopItemPath)));
+				if (WorkshopJsonFile.open(QIODevice::ReadOnly))
+				{
+					const QJsonObject WorkshopJson = QJsonDocument::fromJson(WorkshopJsonFile.readAll()).object();
+					const QString WorkshopType = WorkshopJson.value("Type").toString().trimmed().toLower();
+					if (!WorkshopType.isEmpty() && WorkshopType != "map")
+						continue;
+					MapCode = WorkshopJson.value("FolderName").toString().trimmed();
+					MapTitle = WorkshopJson.value("Title").toString().trimmed();
+				}
+				if (MapCode.isEmpty())
+				{
+					const QStringList FastFiles = QDir(WorkshopItemPath).entryList(QStringList() << "*.ff", QDir::Files, QDir::Name);
+					if (!FastFiles.isEmpty())
+						MapCode = QFileInfo(FastFiles.first()).completeBaseName();
+				}
+				const QString NormalizedMapCode = MapCode.trimmed().toLower();
+				if (NormalizedMapCode.isEmpty() || ExistingQuickLaunchCodes.contains(NormalizedMapCode))
+					continue;
+				ExistingQuickLaunchCodes.insert(NormalizedMapCode);
+				if (MapTitle.isEmpty())
+					MapTitle = DefaultDisplayNameForEntryName(MapCode);
+				WorkshopEntries.append(qMakePair(MapTitle, QString("%1|%2").arg(MapCode, WorkshopId)));
+			}
+			std::sort(WorkshopEntries.begin(), WorkshopEntries.end(), [](const QPair<QString, QString>& Left, const QPair<QString, QString>& Right)
+			{
+				return Left.first.toLower() < Right.first.toLower();
+			});
+			for (const QPair<QString, QString>& WorkshopEntry : WorkshopEntries)
+				mQuickLaunchWidget->AddEntry("Workshop", WorkshopEntry.first, WorkshopEntry.second.section('|', 0, 0), QString("Workshop ID: %1").arg(WorkshopEntry.second.section('|', 1, 1)), WorkshopEntry.second.section('|', 1, 1));
+			AppendStartupTrace(QString("quick-launch:workshop-scan-done count=%1").arg(WorkshopEntries.count()));
+		}
+	}
+
+	mQuickLaunchWidget->EndBatchUpdate();
+	UpdateQuickLaunchVisibility();
+	AppendStartupTrace("quick-launch:workshop-populate-done");
+}
+
 static const char* kThemeProfileSettingKey = "SelectedThemeProfile";
 static const char* kThemeProfilesGroup = "ThemeProfiles";
 
@@ -116,7 +1132,7 @@ static QString BuiltInThemeProfileId(int ThemeModeValue)
 		return "dark-modern";
 	case ThemeOriginalUpdated:
 	default:
-		return "original-updated";
+		return "original-classic";
 	}
 }
 
@@ -132,7 +1148,7 @@ static int ThemeModeFromProfileId(const QString& ThemeProfileId)
 static QString ThemeProfileDisplayNameForBuiltInId(const QString& ThemeProfileId)
 {
 	if (ThemeProfileId == "original-classic")
-		return "Original Classic";
+		return "Classic Upgrade";
 	if (ThemeProfileId == "dark-modern")
 		return "Dark Modern";
 	return "Original Updated";
@@ -150,6 +1166,7 @@ static QStringList ThemeProfileSettingKeys()
 		<< "AssetTreeBackgroundOpacity"
 		<< "LogBackgroundImage"
 		<< "LogBackgroundOpacity"
+		<< "UseLegacyToolbarIcons"
 		<< "LauncherLayout"
 		<< "LogColors/Default"
 		<< "LogColors/Command"
@@ -172,6 +1189,7 @@ static QVariantMap DefaultThemeProfileValues(const QString& ThemeProfileId)
 	Values.insert("AssetTreeBackgroundOpacity", 100);
 	Values.insert("LogBackgroundImage", "");
 	Values.insert("LogBackgroundOpacity", 100);
+	Values.insert("UseLegacyToolbarIcons", false);
 	Values.insert("LauncherLayout", "modern");
 	Values.insert("LogColors/Default", "#d7dce2");
 	Values.insert("LogColors/Command", "#7dcfff");
@@ -215,7 +1233,9 @@ enum mlLogDataRole
 {
 	ML_LOG_TEXT_ROLE = Qt::UserRole + 100,
 	ML_LOG_IS_HEADER_ROLE,
-	ML_LOG_EXPANDED_ROLE
+	ML_LOG_EXPANDED_ROLE,
+	ML_LOG_TEXT_COLOR_ROLE,
+	ML_LOG_BG_COLOR_ROLE
 };
 
 static QString StripTreyarchColorCodes(const QString& Title)
@@ -464,6 +1484,473 @@ static bool ConfirmDestructiveActionTwice(QWidget* Parent, const QString& Title,
 	return QMessageBox::warning(Parent, Title, QString("Are you sure you want to delete %1?").arg(TargetLabel), QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes;
 }
 
+static bool IsTextFileForRenameTransform(const QString& FilePath)
+{
+	const QString LowerName = QFileInfo(FilePath).fileName().toLower();
+	static const char* Suffixes[] =
+	{
+		".gsc", ".csc", ".gsh", ".csv", ".csv.partial", ".zone", ".zone.partial", ".szc",
+		".json", ".cfg", ".txt", ".menu", ".lua", ".map", ".bak", ".lin", ".deps",
+		".errorlog", ".log", ".str", ".vision", ".atr", ".inc", ".py", ".sh", ".bat",
+		".cpp", ".c", ".h", ".hpp", ".vcxproj", ".filters", ".sln", ".md"
+	};
+	for (int SuffixIdx = 0; SuffixIdx < static_cast<int>(sizeof(Suffixes) / sizeof(Suffixes[0])); SuffixIdx++)
+	{
+		if (LowerName.endsWith(Suffixes[SuffixIdx]))
+			return true;
+	}
+
+	return false;
+}
+
+static bool EnsureParentFolderExists(const QString& FilePath)
+{
+	return QDir().mkpath(QFileInfo(FilePath).absolutePath());
+}
+
+static bool CopyFilePlain(const QString& SourcePath, const QString& TargetPath, QString* Error = NULL)
+{
+	if (!EnsureParentFolderExists(TargetPath))
+	{
+		if (Error)
+			*Error = QString("Unable to create '%1'.").arg(QFileInfo(TargetPath).absolutePath());
+		return false;
+	}
+
+	QFile::remove(TargetPath);
+	if (!QFile::copy(SourcePath, TargetPath))
+	{
+		if (Error)
+			*Error = QString("Unable to copy '%1' to '%2'.").arg(QDir::toNativeSeparators(SourcePath), QDir::toNativeSeparators(TargetPath));
+		return false;
+	}
+
+	return true;
+}
+
+static bool CopyFileWithRenameTransform(const QString& SourcePath, const QString& TargetPath, const QString& OldName, const QString& NewName, QString* Error = NULL)
+{
+	if (IsTextFileForRenameTransform(SourcePath))
+	{
+		QFile SourceFile(SourcePath);
+		if (!SourceFile.open(QIODevice::ReadOnly))
+		{
+			if (Error)
+				*Error = QString("Unable to read '%1'.").arg(QDir::toNativeSeparators(SourcePath));
+			return false;
+		}
+
+		if (!EnsureParentFolderExists(TargetPath))
+		{
+			if (Error)
+				*Error = QString("Unable to create '%1'.").arg(QFileInfo(TargetPath).absolutePath());
+			return false;
+		}
+
+		QString Text = QString::fromUtf8(SourceFile.readAll());
+		Text.replace(OldName, NewName);
+
+		QFile TargetFile(TargetPath);
+		if (!TargetFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		{
+			if (Error)
+				*Error = QString("Unable to write '%1'.").arg(QDir::toNativeSeparators(TargetPath));
+			return false;
+		}
+
+		TargetFile.write(Text.toUtf8());
+		return true;
+	}
+
+	return CopyFilePlain(SourcePath, TargetPath, Error);
+}
+
+static bool CopyDirectoryRecursive(const QString& SourceRoot, const QString& TargetRoot, QString* Error = NULL)
+{
+	QDir SourceDir(SourceRoot);
+	if (!SourceDir.exists())
+		return true;
+
+	if (!QDir().mkpath(TargetRoot))
+	{
+		if (Error)
+			*Error = QString("Unable to create '%1'.").arg(QDir::toNativeSeparators(TargetRoot));
+		return false;
+	}
+
+	QDirIterator It(SourceRoot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+	while (It.hasNext())
+	{
+		It.next();
+		const QString RelativePath = SourceDir.relativeFilePath(It.filePath());
+		const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(TargetRoot, RelativePath));
+
+		if (It.fileInfo().isDir())
+		{
+			if (!QDir().mkpath(TargetPath))
+			{
+				if (Error)
+					*Error = QString("Unable to create '%1'.").arg(QDir::toNativeSeparators(TargetPath));
+				return false;
+			}
+			continue;
+		}
+
+		if (!CopyFilePlain(It.filePath(), TargetPath, Error))
+			return false;
+	}
+
+	return true;
+}
+
+static bool CopyDirectoryWithRenameTransform(const QString& SourceRoot, const QString& TargetRoot, const QString& OldName, const QString& NewName, QString* Error = NULL)
+{
+	QDir SourceDir(SourceRoot);
+	if (!SourceDir.exists())
+		return true;
+
+	if (!QDir().mkpath(TargetRoot))
+	{
+		if (Error)
+			*Error = QString("Unable to create '%1'.").arg(QDir::toNativeSeparators(TargetRoot));
+		return false;
+	}
+
+	QDirIterator It(SourceRoot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+	while (It.hasNext())
+	{
+		It.next();
+		QString RelativePath = SourceDir.relativeFilePath(It.filePath());
+		RelativePath.replace(OldName, NewName);
+		const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(TargetRoot, RelativePath));
+
+		if (It.fileInfo().isDir())
+		{
+			if (!QDir().mkpath(TargetPath))
+			{
+				if (Error)
+					*Error = QString("Unable to create '%1'.").arg(QDir::toNativeSeparators(TargetPath));
+				return false;
+			}
+			continue;
+		}
+
+		if (!CopyFileWithRenameTransform(It.filePath(), TargetPath, OldName, NewName, Error))
+			return false;
+	}
+
+	return true;
+}
+
+static QString NormalizeScriptAssetPath(QString Value)
+{
+	Value = Value.trimmed();
+	Value.replace('\\', '/');
+	while (Value.contains("//"))
+		Value.replace("//", "/");
+	return Value.toLower();
+}
+
+static QStringList CollectFilesWhoseRelativePathContains(const QString& RootPath, const QString& Token)
+{
+	QStringList Matches;
+	QDir RootDir(RootPath);
+	if (!RootDir.exists())
+		return Matches;
+
+	QDirIterator It(RootPath, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+	while (It.hasNext())
+	{
+		const QString FilePath = It.next();
+		const QString RelativePath = RootDir.relativeFilePath(FilePath);
+		if (RelativePath.contains(Token, Qt::CaseSensitive))
+			Matches << FilePath;
+	}
+
+	return Matches;
+}
+
+static QStringList ExtractClientfieldRegistrations(const QString& Text)
+{
+	QStringList Fields;
+	QRegularExpression Expression("clientfield::register\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*(?:\"([^\"]+)\"|([A-Za-z0-9_\\.]+))", QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		const QRegularExpressionMatch Match = It.next();
+		const QString Name = Match.captured(1).isEmpty() ? Match.captured(2).trimmed() : Match.captured(1).trimmed();
+		if (!Name.isEmpty())
+			Fields << Name.toLower();
+	}
+	return Fields;
+}
+
+static QString StripScriptComments(QString Text)
+{
+	Text.remove(QRegularExpression("/\\*.*?\\*/", QRegularExpression::DotMatchesEverythingOption));
+	Text.remove(QRegularExpression("(^|\\s)//[^\\n\\r]*", QRegularExpression::MultilineOption));
+	Text.remove(QRegularExpression("(^|\\s)--[^\\n\\r]*", QRegularExpression::MultilineOption));
+	return Text;
+}
+
+static QStringList ExtractDeclaredNamespaces(const QString& Text)
+{
+	QStringList Namespaces;
+	QRegularExpression Expression("^\\s*#namespace\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*;", QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(StripScriptComments(Text));
+	while (It.hasNext())
+	{
+		const QString NamespaceName = It.next().captured(1).trimmed().toLower();
+		if (!NamespaceName.isEmpty())
+			Namespaces << NamespaceName;
+	}
+	return Namespaces;
+}
+
+static QStringList ExtractScriptUsings(const QString& Text)
+{
+	QStringList Paths;
+	QRegularExpression Expression("^\\s*#using\\s+([^\\s;]+)", QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		QString Path = It.next().captured(1).trimmed();
+		Path.remove(';');
+		Path.remove('"');
+		if (!Path.isEmpty())
+			Paths << NormalizeScriptAssetPath(Path);
+	}
+	return Paths;
+}
+
+static QStringList ExtractNamespaceUsages(const QString& Text)
+{
+	QStringList Namespaces;
+	QRegularExpression Expression("\\b([A-Za-z_][A-Za-z0-9_]*)::[A-Za-z_][A-Za-z0-9_]*");
+	QRegularExpressionMatchIterator It = Expression.globalMatch(StripScriptComments(Text));
+	while (It.hasNext())
+	{
+		const QString NamespaceName = It.next().captured(1).trimmed();
+		if (!NamespaceName.isEmpty())
+			Namespaces << NamespaceName.toLower();
+	}
+	return Namespaces;
+}
+
+static QStringList ExtractZoneScriptEntries(const QString& Text)
+{
+	QStringList Entries;
+	QRegularExpression Expression("^\\s*scriptparsetree\\s*,\\s*([^\\s,]+)", QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		const QString Entry = NormalizeScriptAssetPath(It.next().captured(1));
+		if (!Entry.isEmpty())
+			Entries << Entry;
+	}
+	return Entries;
+}
+
+static QStringList ExtractCommentedZoneEntriesForType(const QString& Text, const QString& EntryType)
+{
+	QStringList Entries;
+	QRegularExpression Expression(
+		QString("^\\s*//+\\s*%1\\s*,\\s*([^\\s,]+)").arg(QRegularExpression::escape(EntryType)),
+		QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		const QString Entry = NormalizeScriptAssetPath(It.next().captured(1));
+		if (!Entry.isEmpty())
+			Entries << Entry;
+	}
+	return Entries;
+}
+
+static QStringList ExtractZoneEntriesForType(const QString& Text, const QString& EntryType)
+{
+	QStringList Entries;
+	QRegularExpression Expression(
+		QString("^\\s*%1\\s*,\\s*([^\\s,]+)").arg(QRegularExpression::escape(EntryType)),
+		QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		const QString Entry = NormalizeScriptAssetPath(It.next().captured(1));
+		if (!Entry.isEmpty())
+			Entries << Entry;
+	}
+	return Entries;
+}
+
+static QString NormalizeDefaultManifestPath(QString Value)
+{
+	Value = NormalizeScriptAssetPath(Value);
+	if (Value.startsWith("./"))
+		Value.remove(0, 2);
+	return Value;
+}
+
+static bool ManifestContainsUiAsset(const QSet<QString>& Manifest, const QString& AssetPath)
+{
+	const QString NormalizedPath = NormalizeDefaultManifestPath(QString("share/raw/%1").arg(AssetPath));
+	if (Manifest.contains(NormalizedPath))
+		return true;
+
+	const int ExtensionIndex = NormalizedPath.lastIndexOf('.');
+	if (ExtensionIndex < 0)
+		return false;
+
+	const QString BasePath = NormalizedPath.left(ExtensionIndex);
+	const QString Extension = NormalizedPath.mid(ExtensionIndex).toLower();
+	if (Extension == ".lua")
+		return Manifest.contains(BasePath + ".luac") || Manifest.contains(BasePath + ".menu");
+	if (Extension == ".luac")
+		return Manifest.contains(BasePath + ".lua");
+	return false;
+}
+
+static bool RawfilePathMatchesVariant(const QString& LeftPath, const QString& RightPath)
+{
+	const QString Left = NormalizeScriptAssetPath(LeftPath);
+	const QString Right = NormalizeScriptAssetPath(RightPath);
+	if (Left == Right)
+		return true;
+
+	const int LeftDot = Left.lastIndexOf('.');
+	const int RightDot = Right.lastIndexOf('.');
+	if (LeftDot < 0 || RightDot < 0)
+		return false;
+
+	const QString LeftBase = Left.left(LeftDot);
+	const QString RightBase = Right.left(RightDot);
+	if (LeftBase != RightBase)
+		return false;
+
+	const QString LeftExt = Left.mid(LeftDot).toLower();
+	const QString RightExt = Right.mid(RightDot).toLower();
+	const QStringList LuaExts = QStringList() << ".lua" << ".luac" << ".menu";
+	return LuaExts.contains(LeftExt) && LuaExts.contains(RightExt);
+}
+
+static bool ZoneContainsRawfilePath(const QSet<QString>& ZoneEntries, const QString& RawfilePath)
+{
+	if (ZoneEntries.contains(RawfilePath))
+		return true;
+
+	for (const QString& Entry : ZoneEntries)
+	{
+		if (RawfilePathMatchesVariant(Entry, RawfilePath))
+			return true;
+	}
+	return false;
+}
+
+static bool HashContainsPathVariant(const QHash<QString, QString>& Entries, const QString& AssetPath)
+{
+	if (Entries.contains(AssetPath))
+		return true;
+
+	for (auto It = Entries.constBegin(); It != Entries.constEnd(); ++It)
+	{
+		if (RawfilePathMatchesVariant(It.key(), AssetPath))
+			return true;
+	}
+	return false;
+}
+
+static QString CanonicalDefaultUiManifestEntry(const QString& RelativePath)
+{
+	const QString Normalized = NormalizeDefaultManifestPath(RelativePath);
+	if (Normalized.startsWith("share/raw/scripts/ui/"))
+		return QString("share/raw/ui/%1").arg(Normalized.mid(QString("share/raw/scripts/ui/").length()));
+	if (Normalized.startsWith("share/raw/scripts/lua/"))
+		return QString("share/raw/lua/%1").arg(Normalized.mid(QString("share/raw/scripts/lua/").length()));
+	return Normalized;
+}
+
+static bool IsNamespaceManifestEntry(const QString& Entry)
+{
+	return Entry.startsWith("namespace:");
+}
+
+static QMultiHash<QString, QString> LoadDefaultScriptNamespacesFromManifest(const QString& ManifestPath)
+{
+	QMultiHash<QString, QString> Namespaces;
+	QFile ManifestFile(ManifestPath);
+	if (!ManifestFile.open(QIODevice::ReadOnly))
+		return Namespaces;
+
+	while (!ManifestFile.atEnd())
+	{
+		const QString Entry = QString::fromUtf8(ManifestFile.readLine()).trimmed();
+		if (!IsNamespaceManifestEntry(Entry))
+			continue;
+
+		const int EqualsIndex = Entry.indexOf('=');
+		if (EqualsIndex <= 10)
+			continue;
+
+		const QString NamespaceName = Entry.mid(QString("namespace:").length(), EqualsIndex - QString("namespace:").length()).trimmed().toLower();
+		const QString ScriptPath = NormalizeDefaultManifestPath(Entry.mid(EqualsIndex + 1).trimmed());
+		if (!NamespaceName.isEmpty() && !ScriptPath.isEmpty())
+			Namespaces.insert(NamespaceName, ScriptPath);
+	}
+
+	return Namespaces;
+}
+
+static QString LuaModuleToRawfilePath(QString ModuleName)
+{
+	ModuleName = ModuleName.trimmed();
+	ModuleName.remove('"');
+	ModuleName.remove('\'');
+	if (ModuleName.isEmpty())
+		return QString();
+
+	QString Path = ModuleName;
+	Path.replace('.', '/');
+	if (!Path.startsWith("ui/", Qt::CaseInsensitive) && !Path.startsWith("lua/", Qt::CaseInsensitive))
+		return QString();
+	return NormalizeScriptAssetPath(Path + ".lua");
+}
+
+static QStringList ExtractUiRequireModules(const QString& Text)
+{
+	QStringList Modules;
+	QRegularExpression RequireExpression("require\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)", QRegularExpression::CaseInsensitiveOption);
+	QRegularExpression LuiLoadExpression("LuiLoad\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)", QRegularExpression::CaseInsensitiveOption);
+
+	auto AppendMatches = [&](const QRegularExpression& Expression)
+	{
+		QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+		while (It.hasNext())
+		{
+			const QString ModuleName = It.next().captured(1).trimmed();
+			if (!ModuleName.isEmpty())
+				Modules << ModuleName;
+		}
+	};
+
+	AppendMatches(RequireExpression);
+	AppendMatches(LuiLoadExpression);
+	return Modules;
+}
+
+static QStringList ExtractWeaponTableLoads(const QString& Text)
+{
+	QStringList Tables;
+	QRegularExpression Expression("load_weapon_spec_from_table\\s*\\(\\s*[\"']([^\"']+)[\"']", QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator It = Expression.globalMatch(Text);
+	while (It.hasNext())
+	{
+		const QString Entry = NormalizeScriptAssetPath(It.next().captured(1));
+		if (!Entry.isEmpty())
+			Tables << Entry;
+	}
+	return Tables;
+}
+
 enum LogMessageKind
 {
 	LogMessageDefault,
@@ -666,6 +2153,7 @@ static bool IsUnrecoverableLogLine(const QString& Text)
 static bool ShouldContinueCurrentLogBlock(const QString& CurrentBlockText, const QString& NextLine)
 {
 	const QString CurrentLower = CurrentBlockText.toLower();
+	const QString CurrentFirstLineLower = CurrentBlockText.section('\n', 0, 0).trimmed().toLower();
 	const QString NextLower = NextLine.trimmed().toLower();
 	if (CurrentLower.isEmpty() || NextLower.isEmpty())
 		return false;
@@ -678,6 +2166,18 @@ static bool ShouldContinueCurrentLogBlock(const QString& CurrentBlockText, const
 			|| NextLower.startsWith("processed(")
 			|| NextLower.startsWith("gdtdb: successfully updated database");
 	}
+
+	const bool LinkingProcessingBlock = CurrentFirstLineLower.startsWith("linking ") && CurrentLower.contains("processing...");
+	if (LinkingProcessingBlock && NextLower.startsWith("done:"))
+		return true;
+
+	const bool L3akModBlock = CurrentFirstLineLower.startsWith("[l3akmod");
+	if (L3akModBlock && NextLower.startsWith("[l3akmod"))
+		return true;
+
+	const bool PhilLibXBlock = CurrentFirstLineLower.startsWith("phillibx.t7mtenhancements:");
+	if (PhilLibXBlock && NextLower.startsWith("phillibx.t7mtenhancements:"))
+		return true;
 
 	return false;
 }
@@ -729,6 +2229,132 @@ static QStringList ExtractLogBlocks(const QString& Output)
 	return Blocks;
 }
 
+static QString BuildPlainConsoleOutput(const QString& Output, bool CompactBlankLines, int OutputTabIndex = OutputLogTabFull)
+{
+	const QString NormalizedOutput = QString(Output).replace("\r", "");
+	QSettings Settings;
+	QStringList VisibleLines;
+	const QStringList RawLines = NormalizedOutput.split('\n');
+	VisibleLines.reserve(RawLines.count());
+	for (const QString& Line : RawLines)
+	{
+		const QString TrimmedLine = Line.trimmed();
+		if (TrimmedLine.isEmpty() || ShouldDisplayLogOutput(Settings, TrimmedLine, OutputTabIndex))
+			VisibleLines.append(Line);
+	}
+
+	const QString FilteredOutput = VisibleLines.join("\n");
+	if (!CompactBlankLines)
+		return FilteredOutput;
+
+	const QStringList Blocks = ExtractLogBlocks(FilteredOutput);
+	if (!Blocks.isEmpty())
+	{
+		QStringList VisibleBlocks;
+		for (const QString& Block : Blocks)
+		{
+			bool ShowBlock = false;
+			const QStringList BlockLines = Block.split('\n');
+			for (const QString& BlockLine : BlockLines)
+			{
+				const QString TrimmedLine = BlockLine.trimmed();
+				if (!TrimmedLine.isEmpty() && ShouldDisplayLogOutput(Settings, TrimmedLine, OutputTabIndex))
+				{
+					ShowBlock = true;
+					break;
+				}
+			}
+			if (ShowBlock)
+				VisibleBlocks.append(Block);
+		}
+
+		if (!VisibleBlocks.isEmpty())
+			return VisibleBlocks.join("\n\n");
+	}
+
+	const QStringList Lines = FilteredOutput.split('\n');
+	QStringList CompactLines;
+	CompactLines.reserve(Lines.count());
+	bool PreviousLineBlank = false;
+	for (const QString& Line : Lines)
+	{
+		const bool IsBlank = Line.trimmed().isEmpty();
+		if (IsBlank)
+		{
+			if (PreviousLineBlank)
+				continue;
+			PreviousLineBlank = true;
+			CompactLines.append(QString());
+			continue;
+		}
+
+		PreviousLineBlank = false;
+		CompactLines.append(Line);
+	}
+
+	return CompactLines.join("\n");
+}
+
+static bool IsConsoleColorCodingEnabled(const QSettings& Settings)
+{
+	return Settings.value("ConsoleColorCodingEnabled", true).toBool();
+}
+
+static QString LogBlockLineColor(const QString& Line, const QString& DefaultColor);
+
+class OutputPlainHighlighter : public QSyntaxHighlighter
+{
+public:
+	OutputPlainHighlighter(QTextDocument* Parent)
+		: QSyntaxHighlighter(Parent), mColorize(false), mDefaultColor("#d7dce2")
+	{
+	}
+
+	void Configure(bool Colorize, const QColor& DefaultColor)
+	{
+		mColorize = Colorize;
+		if (DefaultColor.isValid())
+			mDefaultColor = DefaultColor;
+		rehighlight();
+	}
+
+protected:
+	void highlightBlock(const QString& Text)
+	{
+		if (Text.isEmpty())
+			return;
+
+		if (!mColorize)
+		{
+			setFormat(0, Text.length(), QTextCharFormat());
+			return;
+		}
+
+		QTextCharFormat LineFormat;
+		LineFormat.setForeground(QColor(LogBlockLineColor(Text, mDefaultColor.name(QColor::HexRgb))));
+		setFormat(0, Text.length(), LineFormat);
+	}
+
+private:
+	bool mColorize;
+	QColor mDefaultColor;
+};
+
+static void EnsureOutputPlainHighlighter(QPlainTextEdit* PlainOutput, bool Colorize, const QColor& DefaultColor)
+{
+	if (!PlainOutput || !PlainOutput->document())
+		return;
+
+	OutputPlainHighlighter* Highlighter = PlainOutput->document()->findChild<OutputPlainHighlighter*>("OutputPlainHighlighter");
+	if (!Highlighter)
+	{
+		Highlighter = new OutputPlainHighlighter(PlainOutput->document());
+		Highlighter->setObjectName("OutputPlainHighlighter");
+	}
+
+	Highlighter->Configure(Colorize, DefaultColor);
+}
+
 static bool ShouldDisplayLogBlock(const QSettings& Settings, const QString& BlockText, int OutputTabIndex)
 {
 	const QStringList Lines = BlockText.split('\n');
@@ -775,20 +2401,20 @@ static QColor OutputBlockBackgroundColor(int ThemeModeValue, LogMessageKind Kind
 	Q_UNUSED(BlockIndex);
 	QColor BaseColor;
 	if (UseClassicChrome)
-		BaseColor = QApplication::palette().color(QPalette::Base);
+		BaseColor = QColor(54, 54, 54, 255);
 	else if (UseDarkModernChrome)
-		BaseColor = QColor(8, 10, 13, (BlockIndex % 2) ? 108 : 120);
+		BaseColor = QColor(5, 6, 8, (BlockIndex % 2) ? 146 : 158);
 	else
-		BaseColor = QColor(16, 16, 16, (BlockIndex % 2) ? 96 : 112);
+		BaseColor = QColor(10, 10, 10, (BlockIndex % 2) ? 132 : 146);
 
 	if (Kind == LogMessageWarning)
-		BaseColor = UseClassicChrome ? QColor(90, 90, 90, 255) : (UseDarkModernChrome ? QColor(40, 28, 12, 128) : QColor(44, 32, 16, 122));
+		BaseColor = UseClassicChrome ? QColor(66, 58, 44, 255) : (UseDarkModernChrome ? QColor(30, 20, 9, 144) : QColor(34, 24, 12, 138));
 	else if (Kind == LogMessageError)
-		BaseColor = UseClassicChrome ? QColor(90, 90, 90, 255) : (UseDarkModernChrome ? QColor(40, 16, 16, 132) : QColor(42, 18, 18, 126));
+		BaseColor = UseClassicChrome ? QColor(68, 48, 48, 255) : (UseDarkModernChrome ? QColor(30, 11, 11, 148) : QColor(34, 14, 14, 142));
 	else if (Kind == LogMessageSuccess)
-		BaseColor = UseClassicChrome ? QColor(90, 90, 90, 255) : (UseDarkModernChrome ? QColor(16, 34, 24, 122) : QColor(20, 36, 26, 116));
+		BaseColor = UseClassicChrome ? QColor(46, 62, 52, 255) : (UseDarkModernChrome ? QColor(11, 26, 18, 140) : QColor(14, 28, 20, 134));
 	else if (Kind == LogMessageAccent || Kind == LogMessageLaunch)
-		BaseColor = UseClassicChrome ? QColor(90, 90, 90, 255) : (UseDarkModernChrome ? QColor(28, 20, 38, 124) : QColor(32, 24, 42, 118));
+		BaseColor = UseClassicChrome ? QColor(58, 54, 70, 255) : (UseDarkModernChrome ? QColor(20, 15, 30, 142) : QColor(24, 18, 34, 136));
 
 	return BaseColor;
 }
@@ -864,7 +2490,31 @@ static int LogBlockWidgetHeight(const QString& Text, bool Expanded)
 
 static QString LogBlockLineColor(const QString& Line, const QString& DefaultColor)
 {
+	QSettings Settings;
+	if (!IsConsoleColorCodingEnabled(Settings))
+		return DefaultColor;
+
 	const QString TrimmedLower = Line.trimmed().toLower();
+	if (TrimmedLower.contains("^3"))
+		return QString("#f6bd60");
+	if (TrimmedLower.startsWith("^1"))
+		return QString("#ff7a7a");
+	if (TrimmedLower.startsWith("weapon:") || TrimmedLower.startsWith("weaponcamo:"))
+		return QString("#c792ea");
+	if (TrimmedLower.contains("material '") && TrimmedLower.contains("using technique"))
+		return QString("#f6bd60");
+	if (TrimmedLower.startsWith("material textures:"))
+		return QString("#f6bd60");
+	if (TrimmedLower.contains("linker_modtools.exe"))
+		return QString("#8fb7ff");
+	if (TrimmedLower.startsWith("processed ") || TrimmedLower.startsWith("processed("))
+		return QString("#8fb7ff");
+	if (TrimmedLower.startsWith("gdtdb:") || TrimmedLower.contains("gdtdb"))
+		return QString("#8fb7ff");
+	if (TrimmedLower.startsWith("[l3akmod"))
+		return QString("#88dcb7");
+	if (TrimmedLower.startsWith("phillibx.t7mtenhancements:"))
+		return QString("#789b98");
 	if (TrimmedLower.startsWith("linking ") || TrimmedLower == "processing..." || TrimmedLower.startsWith("done:"))
 		return QString("#6ee7a8");
 	if (TrimmedLower.startsWith("techset:"))
@@ -914,6 +2564,8 @@ static QString LogBlockHtml(const QString& Text, const QColor& TextColor, bool E
 		.arg(HtmlLines.join("<br/>"));
 }
 
+static void UpdateLogBlockWidget(QWidget* BlockWidget, const QString& Text, const QColor& TextColor, const QColor& BackgroundColor, bool Expanded);
+
 static QWidget* CreateLogBlockWidget(QWidget* Parent, const QString& Text, const QColor& TextColor, const QColor& BackgroundColor, bool Expanded)
 {
 	QWidget* BlockWidget = new QWidget(Parent);
@@ -940,6 +2592,72 @@ static QWidget* CreateLogBlockWidget(QWidget* Parent, const QString& Text, const
 
 	ApplyLogRowVisualStyle(BlockWidget, BackgroundColor, true, true);
 	return BlockWidget;
+}
+
+static QWidget* CreateLogBlockActionWidget(QTreeWidget* ParentTree, QTreeWidgetItem* Item)
+{
+	QWidget* ActionsWidget = new QWidget(ParentTree);
+	ActionsWidget->setObjectName("LogBlockActionWidget");
+	QHBoxLayout* ActionsLayout = new QHBoxLayout(ActionsWidget);
+	ActionsLayout->setContentsMargins(0, 0, 0, 0);
+	ActionsLayout->setSpacing(4);
+
+	QToolButton* CopyButton = new QToolButton(ActionsWidget);
+	CopyButton->setObjectName("LogBlockCopyButton");
+	QIcon CopyIcon = QIcon::fromTheme("edit-copy");
+	if (CopyIcon.isNull())
+		CopyIcon = QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton);
+	CopyButton->setIcon(CopyIcon);
+	CopyButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+	CopyButton->setFixedSize(20, 18);
+	CopyButton->setAutoRaise(false);
+	CopyButton->setToolTip("Copy this block to clipboard.");
+	CopyButton->setStyleSheet("QToolButton { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 3px; padding: 0; }"
+		"QToolButton:hover { background: rgba(255,255,255,0.26); border: 1px solid rgba(255,255,255,0.50); }"
+		"QToolButton:pressed { background: rgba(255,255,255,0.36); border: 1px solid rgba(255,255,255,0.65); }");
+	QObject::connect(CopyButton, &QToolButton::clicked, ActionsWidget, [Item]()
+	{
+		if (!Item)
+			return;
+		QApplication::clipboard()->setText(Item->data(0, ML_LOG_TEXT_ROLE).toString());
+	});
+
+	QToolButton* ToggleButton = new QToolButton(ActionsWidget);
+	ToggleButton->setObjectName("LogBlockToggleButton");
+	ToggleButton->setAutoRaise(true);
+	ToggleButton->setToolTip("Collapse or expand this block.");
+	ToggleButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+	ToggleButton->setFixedSize(18, 18);
+	ToggleButton->setStyleSheet("QToolButton { background: transparent; border: 0; padding: 0; }"
+		"QToolButton:hover { background: transparent; border: 0; }"
+		"QToolButton:pressed { background: transparent; border: 0; }");
+	const bool Expanded = Item && Item->data(0, ML_LOG_EXPANDED_ROLE).toBool();
+	ToggleButton->setArrowType(Expanded ? Qt::DownArrow : Qt::RightArrow);
+	QObject::connect(ToggleButton, &QToolButton::clicked, ActionsWidget, [ParentTree, Item]()
+	{
+		if (!ParentTree || !Item)
+			return;
+
+		const bool ExpandedNow = !Item->data(0, ML_LOG_EXPANDED_ROLE).toBool();
+		Item->setData(0, ML_LOG_EXPANDED_ROLE, ExpandedNow);
+		Item->setExpanded(ExpandedNow);
+		const QString BlockText = Item->data(0, ML_LOG_TEXT_ROLE).toString();
+		Item->setSizeHint(0, QSize(0, LogBlockWidgetHeight(BlockText, ExpandedNow)));
+		const QColor TextColor = Item->data(0, ML_LOG_TEXT_COLOR_ROLE).value<QColor>();
+		const QColor BackgroundColor = Item->data(0, ML_LOG_BG_COLOR_ROLE).value<QColor>();
+		UpdateLogBlockWidget(ParentTree->itemWidget(Item, 0), BlockText, TextColor, BackgroundColor, ExpandedNow);
+		if (QWidget* ActionWidget = ParentTree->itemWidget(Item, 1))
+		{
+			QToolButton* ActionToggleButton = ActionWidget->findChild<QToolButton*>("LogBlockToggleButton");
+			if (ActionToggleButton)
+				ActionToggleButton->setArrowType(ExpandedNow ? Qt::DownArrow : Qt::RightArrow);
+		}
+	});
+
+	ActionsLayout->addWidget(CopyButton);
+	ActionsLayout->addWidget(ToggleButton);
+	ActionsLayout->addStretch(1);
+	return ActionsWidget;
 }
 
 static void UpdateLogBlockWidget(QWidget* BlockWidget, const QString& Text, const QColor& TextColor, const QColor& BackgroundColor, bool Expanded)
@@ -1102,6 +2820,7 @@ void mlBuildThread::run()
 		{
 			emit OutputReady(Command.first + ' ' + Command.second.join(' ') + "\n");
 			QProcess::startDetached(Command.first, Command.second, QFileInfo(Command.first).absolutePath());
+			emit CommandFinished(Command.first, Command.second, 0, 0);
 			continue;
 		}
 
@@ -1109,9 +2828,11 @@ void mlBuildThread::run()
 		connect(Process, SIGNAL(finished(int)), Process, SLOT(deleteLater()));
 		Process->setWorkingDirectory(QFileInfo(Command.first).absolutePath());
 		Process->setProcessChannelMode(QProcess::MergedChannels);
+		QElapsedTimer CommandTimer;
 
 		emit OutputReady(Command.first + ' ' + Command.second.join(' ') + "\n");
 
+		CommandTimer.start();
 		Process->start(Command.first, Command.second);
 		if (!Process->waitForStarted(5000))
 			return;
@@ -1134,6 +2855,8 @@ void mlBuildThread::run()
 
 		if (Process->exitStatus() != QProcess::NormalExit)
 			return;
+
+		emit CommandFinished(Command.first, Command.second, CommandTimer.elapsed(), Process->exitCode());
 
 		if (Process->exitCode() != 0)
 		{
@@ -1294,19 +3017,32 @@ void mlConvertThread::run()
 
 mlMainWindow::mlMainWindow()
 {
+	AppendStartupTrace("ctor:start");
 	QSettings Settings;
 	EnsureThemeProfiles();
+	AppendStartupTrace("ctor:settings-ready");
 
 	mBuildThread = NULL;
 	mConvertThread = NULL;
+	mAnalyzeItemButton = NULL;
 	mActiveBuildButton = NULL;
 	mThemesButton = NULL;
+	mActionEditAnalyze = NULL;
+	mActionEditInformation = NULL;
+	mActionFileOpenRoot = NULL;
+	mActionFileOpenConsoleLog = NULL;
+	mActionFileOpenConsoleLogExternal = NULL;
+	mActionFileOpenScriptReference = NULL;
 	mActionThemeModern = NULL;
 	mActionThemeDarkModern = NULL;
 	mActionThemeClassic = NULL;
 	mCategoryTabs = NULL;
+	mCategorySummaryLabel = NULL;
 	mOutputTabs = NULL;
 	mCentralWidgetSplitter = NULL;
+	mAssetDockWidget = NULL;
+	mOutputDockWidget = NULL;
+	mMainToolBar = NULL;
 	mTopWidget = NULL;
 	mLeftPanel = NULL;
 	mActionsPanel = NULL;
@@ -1319,12 +3055,39 @@ mlMainWindow::mlMainWindow()
 	mOutputBackgroundOverlay = NULL;
 	mLogFiltersButton = NULL;
 	mLogSelectionButton = NULL;
+	mFooterVersionLabel = NULL;
+	mFooterRefreshButton = NULL;
+	mFooterUpdateStatusLabel = NULL;
+	mFooterDownloadButton = NULL;
+	mQuickLaunchLabel = NULL;
+	mStartupQuoteLabel = NULL;
+	mStartupQuoteText.clear();
+	mStartupQuotePopupShown = false;
 	mRunOnlineWidget = NULL;
 	mCurrentOutputBlockItem = NULL;
 	mOutputBlockCounter = 0;
 	mCloseGameButton = NULL;
 	mCloseGameStatusLabel = NULL;
 	mLaunchProgressDialog = NULL;
+	mUpdateNetworkAccess = new QNetworkAccessManager(this);
+	mUpdateMetadataReply = NULL;
+	mUpdateDownloadReply = NULL;
+	mUpdateProgressDialog = NULL;
+	mUpdateDownloadFile = NULL;
+	mUpdateDownloadPath.clear();
+	mPendingUpdateVersion.clear();
+	mAvailableUpdateVersion.clear();
+	mAvailableUpdateUrl.clear();
+	mAvailableReleasePageUrl.clear();
+	mLastStatsTickMs = 0;
+	mLastActivityMs = 0;
+	mCurrentItemStartedMs = 0;
+	mPendingGameQueuedMs = 0;
+	mCurrentGameStartedMs = 0;
+	mPendingLaunchRequestedMs = 0;
+	mCurrentStatsItemKey.clear();
+	mPendingGameStatsItemKey.clear();
+	mActiveGameStatsItemKey.clear();
 	mCachedGameRunning = false;
 	mGameProcessId = 0;
 	mGameRunningState = GameNotRunning;
@@ -1338,70 +3101,106 @@ mlMainWindow::mlMainWindow()
 	mAssetTreeBackgroundCachePath.clear();
 	mPendingOutput.clear();
 	mOutputFullText.clear();
-	mOutputSelectionMode = false;
+	mOutputSelectionMode = true;
 	mOutputTabIndex = OutputLogTabFull;
 	mOutputTreeAutoFollow = true;
 	mOutputPlainAutoFollow = true;
 	mPendingOnlineLaunchFeedback = false;
 	mPendingOnlineLaunchLabel.clear();
+	mWorkshopUploadInFlight = false;
 	mPostUploadSteamSyncPending = false;
+	RefreshRunDvars();
 	mOutputFlushTimer.setSingleShot(true);
 	connect(&mOutputFlushTimer, &QTimer::timeout, this, &mlMainWindow::FlushBuildOutput);
+	mStatsTimer.setInterval(1000);
+	connect(&mStatsTimer, &QTimer::timeout, this, &mlMainWindow::StatsTick);
+	mStatsElapsedTimer.start();
+	IncrementStat("Stats/SessionCount");
+	mStatsTimer.start();
+	AppendStartupTrace("ctor:timers-ready");
 
 	// Qt prefers '/' over '\\'
 	mGamePath = QString(getenv("TA_GAME_PATH")).replace('\\', '/');
 	mToolsPath = QString(getenv("TA_TOOLS_PATH")).replace('\\', '/');
+	AppendStartupTrace(QString("ctor:paths game=%1 tools=%2").arg(mGamePath, mToolsPath));
 
 	ApplyThemeProfile(mThemeProfileId);
+	AppendStartupTrace("ctor:theme-profile-applied");
 
 	setWindowIcon(QIcon(":/resources/ModLauncher.png"));
 	setWindowTitle("BO3 Mod Tools Black");
-	
+
 	resize(1180, 780);
 
 	CreateActions();
+	AppendStartupTrace("ctor:actions-created");
 	CreateMenu();
+	AppendStartupTrace("ctor:menu-created");
 	CreateToolBar();
+	AppendStartupTrace("ctor:toolbar-created");
 
 	mExport2BinGUIWidget = NULL;
 
-	mCentralWidgetSplitter = new QSplitter();
-	mCentralWidgetSplitter->setOrientation(Qt::Vertical);
-
 	mTopWidget = new QWidget();
+	mTopWidget->setObjectName("WorkspaceCentralWidget");
 
 	mTopLayout = new QHBoxLayout(mTopWidget);
 	mTopWidget->setLayout(mTopLayout);
 	mTopLayout->setContentsMargins(8, 8, 8, 8);
 	mTopLayout->setSpacing(10);
 
-	mLeftPanel = new QWidget(mTopWidget);
+	mLeftPanel = new QWidget(this);
 	mLeftPanel->setObjectName("AssetListPanel");
 	QVBoxLayout* LeftLayout = new QVBoxLayout(mLeftPanel);
 	LeftLayout->setContentsMargins(0, 0, 0, 0);
 	LeftLayout->setSpacing(0);
 
-	mCategoryTabs = new QTabBar(mLeftPanel);
+	QWidget* CategoryHeader = new QWidget(mLeftPanel);
+	QHBoxLayout* CategoryHeaderLayout = new QHBoxLayout(CategoryHeader);
+	CategoryHeaderLayout->setContentsMargins(0, 0, 0, 0);
+	CategoryHeaderLayout->setSpacing(8);
+	mCategoryTabs = new QTabBar(CategoryHeader);
 	mCategoryTabs->setObjectName("CategoryTabs");
-	mCategoryTabs->addTab("Recent");
-	mCategoryTabs->addTab("Favorites");
-	mCategoryTabs->addTab("ZM Maps");
-	mCategoryTabs->addTab("MP Maps");
-	mCategoryTabs->addTab("Mods");
-	mCategoryTabs->addTab("All");
+	auto AddCategoryTab = [&](const QString& Label, const QString& Key)
+	{
+		const int Index = mCategoryTabs->addTab(Label);
+		mCategoryTabs->setTabData(Index, Key);
+	};
+	AddCategoryTab("All", "all");
+	AddCategoryTab("Recent", "recent");
+	AddCategoryTab("Favorites", "favorites");
+	AddCategoryTab("ZM Maps", "zm-maps");
+	AddCategoryTab("MP Maps", "mp-maps");
+	AddCategoryTab("Mods", "mods");
 	mCategoryTabs->setDocumentMode(true);
 	mCategoryTabs->setExpanding(false);
 	mCategoryTabs->setDrawBase(false);
 	mCategoryTabs->setUsesScrollButtons(false);
 	mCategoryTabs->setElideMode(Qt::ElideNone);
-	const int SavedCategoryTab = Settings.value("ActiveCategoryTab", CategoryAll).toInt();
-	mCategoryTabs->setCurrentIndex(qBound(0, SavedCategoryTab, mCategoryTabs->count() - 1));
-	LeftLayout->addWidget(mCategoryTabs);
+	mCategoryTabs->setMovable(true);
+	const QString SavedCategoryTabKey = NormalizeCategoryTabKey(Settings.value("ActiveCategoryTabKey", "").toString());
+	int SavedCategoryTab = FindCategoryTabIndex(mCategoryTabs, SavedCategoryTabKey);
+	if (SavedCategoryTab < 0)
+	{
+		const int SavedCategoryTabIndex = Settings.value("ActiveCategoryTab", CategoryAll).toInt();
+		SavedCategoryTab = qBound(0, SavedCategoryTabIndex, mCategoryTabs->count() - 1);
+	}
+	mCategoryTabs->setCurrentIndex(SavedCategoryTab);
+	CategoryHeaderLayout->addWidget(mCategoryTabs, 0);
+	CategoryHeaderLayout->addStretch(1);
+	mCategorySummaryLabel = new QLabel(CategoryHeader);
+	mCategorySummaryLabel->setObjectName("CategorySummaryLabel");
+	mCategorySummaryLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	mCategorySummaryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	mCategorySummaryLabel->setStyleSheet("color: #8a8a8a;");
+	CategoryHeaderLayout->addWidget(mCategorySummaryLabel, 0);
+	LeftLayout->addWidget(CategoryHeader);
 
 	mFileListWidget = new QTreeWidget();
 	mFileListWidget->setObjectName("AssetTree");
 	mFileListWidget->setColumnCount(1);
 	mFileListWidget->setHeaderHidden(true);
+	mFileListWidget->setSelectionMode(QAbstractItemView::NoSelection);
 	mFileListWidget->setUniformRowHeights(false);
 	mFileListWidget->setRootIsDecorated(true);
 	mFileListWidget->setAlternatingRowColors(false);
@@ -1421,16 +3220,18 @@ mlMainWindow::mlMainWindow()
 	mAssetTreeBackgroundOverlay->hide();
 	mAssetTreeBackgroundOverlay->lower();
 	LeftLayout->addWidget(mFileListWidget);
-	mTopLayout->addWidget(mLeftPanel);
-	mTopLayout->setStretch(0, 1);
 
 	connect(mCategoryTabs, &QTabBar::currentChanged, this, [=](int Index)
 	{
 		QSettings().setValue("ActiveCategoryTab", Index);
+		QSettings().setValue("ActiveCategoryTabKey", CurrentCategoryTabKey(mCategoryTabs));
 		PopulateFileList();
 	});
 
-	connect(mFileListWidget, SIGNAL(customContextMenuRequested(const QPoint&)), this, SLOT(ContextMenuRequested()));
+	connect(mFileListWidget, &QTreeWidget::customContextMenuRequested, this, [=](const QPoint& Position)
+	{
+		ContextMenuRequested(Position);
+	});
 	connect(mFileListWidget, &QTreeWidget::itemExpanded, this, [=](QTreeWidgetItem* Item)
 	{
 		if (!Item || Item->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN)
@@ -1444,27 +3245,31 @@ mlMainWindow::mlMainWindow()
 		QSettings().setValue(SectionSettingKey(Item->text(0)) + "/Expanded", false);
 	});
 	connect(mFileListWidget, &QTreeWidget::currentItemChanged, this, [=](QTreeWidgetItem* CurrentItem, QTreeWidgetItem* PreviousItem)
-	{
-		SyncItemSelectionWidget(PreviousItem);
-		SyncItemSelectionWidget(CurrentItem);
-		UpdateGameRunningState();
-	});
+		{
+			SyncItemSelectionWidget(PreviousItem);
+			SyncItemSelectionWidget(CurrentItem);
+			SetCurrentStatsItem(CurrentItem);
+			UpdateBuildActionButtons();
+			UpdateQuickLaunchVisibility();
+			UpdateGameRunningState();
+		});
 
 	mActionsPanel = new QWidget(mTopWidget);
 	mActionsPanel->setObjectName("ActionsPanel");
 	mActionsPanel->setMinimumWidth(220);
 	mActionsPanel->setMaximumWidth(220);
 	mActionsPanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-	mTopLayout->addWidget(mActionsPanel);
 
 	QVBoxLayout* ActionsLayout = new QVBoxLayout(mActionsPanel);
-	ActionsLayout->setContentsMargins(10, 10, 10, 10);
-	ActionsLayout->setSpacing(10);
+	ActionsLayout->setContentsMargins(10, 8, 10, 8);
+	ActionsLayout->setSpacing(6);
 
 	QLabel* BuildOptionsLabel = new QLabel("Build Options");
 	ActionsLayout->addWidget(BuildOptionsLabel);
 
 	QHBoxLayout* CompileLayout = new QHBoxLayout();
+	CompileLayout->setContentsMargins(0, 0, 0, 0);
+	CompileLayout->setSpacing(4);
 	ActionsLayout->addLayout(CompileLayout);
 
 	mCompileEnabledWidget = new QCheckBox("Compile");
@@ -1476,6 +3281,8 @@ mlMainWindow::mlMainWindow()
 	CompileLayout->addWidget(mCompileModeWidget);
 
 	QHBoxLayout* LightLayout = new QHBoxLayout();
+	LightLayout->setContentsMargins(0, 0, 0, 0);
+	LightLayout->setSpacing(4);
 	ActionsLayout->addLayout(LightLayout);
 
 	mLightEnabledWidget = new QCheckBox("Light");
@@ -1492,6 +3299,7 @@ mlMainWindow::mlMainWindow()
 
 	mRunEnabledWidget = new QCheckBox("Run");
 	ActionsLayout->addWidget(mRunEnabledWidget);
+	ActionsLayout->addSpacing(2);
 
 	mRunOptionsWidget = new QLineEdit();
 	mRunOptionsWidget->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
@@ -1501,133 +3309,36 @@ mlMainWindow::mlMainWindow()
 	connect(mLightEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
 	connect(mLinkEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
 	connect(mRunEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
-	QLabel* QuickLaunchLabel = new QLabel("Quick Launch Map");
-	ActionsLayout->addWidget(QuickLaunchLabel);
+	mQuickLaunchLabel = new QLabel("Quick Launch Map");
+	ActionsLayout->addWidget(mQuickLaunchLabel);
 
-	mQuickLaunchWidget = new QComboBox();
-	mQuickLaunchWidget->setObjectName("QuickLaunchCombo");
-	mQuickLaunchWidget->setMinimumWidth(206);
-	mQuickLaunchWidget->setMinimumHeight(28);
-	mQuickLaunchWidget->setMaximumHeight(28);
-	mQuickLaunchWidget->addItem("No Map", "");
-	mQuickLaunchWidget->addItem("Zombies: Shadows of Evil (zm_zod)", "zm_zod");
-	mQuickLaunchWidget->addItem("Zombies: The Giant (zm_factory)", "zm_factory");
-	mQuickLaunchWidget->addItem("Zombies: Der Eisendrache (zm_castle)", "zm_castle");
-	mQuickLaunchWidget->addItem("Zombies: Zetsubou No Shima (zm_island)", "zm_island");
-	mQuickLaunchWidget->addItem("Zombies: Gorod Krovi (zm_stalingrad)", "zm_stalingrad");
-	mQuickLaunchWidget->addItem("Zombies: Revelations (zm_genesis)", "zm_genesis");
-	mQuickLaunchWidget->addItem("Zombies: Nacht der Untoten (zm_prototype)", "zm_prototype");
-	mQuickLaunchWidget->addItem("Zombies: Verruckt (zm_asylum)", "zm_asylum");
-	mQuickLaunchWidget->addItem("Zombies: Shi No Numa (zm_sumpf)", "zm_sumpf");
-	mQuickLaunchWidget->addItem("Zombies: Kino der Toten (zm_theater)", "zm_theater");
-	mQuickLaunchWidget->addItem("Zombies: Ascension (zm_cosmodrome)", "zm_cosmodrome");
-	mQuickLaunchWidget->addItem("Zombies: Shangri-La (zm_temple)", "zm_temple");
-	mQuickLaunchWidget->addItem("Zombies: Moon (zm_moon)", "zm_moon");
-	mQuickLaunchWidget->addItem("Zombies: Origins (zm_tomb)", "zm_tomb");
-	mQuickLaunchWidget->addItem("Zombies: Dead Ops Arcade 2 (cp_doa_bo3)", "cp_doa_bo3");
-	mQuickLaunchWidget->insertSeparator(mQuickLaunchWidget->count());
-	mQuickLaunchWidget->addItem("MP: Aquarium (mp_biodome)", "mp_biodome");
-	mQuickLaunchWidget->addItem("MP: Breach (mp_spire)", "mp_spire");
-	mQuickLaunchWidget->addItem("MP: Combine (mp_sector)", "mp_sector");
-	mQuickLaunchWidget->addItem("MP: Evac (mp_apartments)", "mp_apartments");
-	mQuickLaunchWidget->addItem("MP: Exodus (mp_chinatown)", "mp_chinatown");
-	mQuickLaunchWidget->addItem("MP: Fringe (mp_veiled)", "mp_veiled");
-	mQuickLaunchWidget->addItem("MP: Havoc (mp_havoc)", "mp_havoc");
-	mQuickLaunchWidget->addItem("MP: Hunted (mp_ethiopia)", "mp_ethiopia");
-	mQuickLaunchWidget->addItem("MP: Infection (mp_infection)", "mp_infection");
-	mQuickLaunchWidget->addItem("MP: Metro (mp_metro)", "mp_metro");
-	mQuickLaunchWidget->addItem("MP: Redwood (mp_redwood)", "mp_redwood");
-	mQuickLaunchWidget->addItem("MP: Stronghold (mp_stonghold)", "mp_stonghold");
-	mQuickLaunchWidget->addItem("MP: Nuk3town (mp_nuketown_x)", "mp_nuketown_x");
-	mQuickLaunchWidget->addItem("MP: Rise (mp_rise)", "mp_rise");
-	mQuickLaunchWidget->addItem("MP: Splash (mp_waterpark)", "mp_waterpark");
-	mQuickLaunchWidget->addItem("MP: Skyjacked (mp_skyjacked)", "mp_skyjacked");
-	mQuickLaunchWidget->addItem("MP: Gauntlet (mp_crucible)", "mp_crucible");
-	mQuickLaunchWidget->addItem("MP: Knockout (mp_kung_fu)", "mp_kung_fu");
-	mQuickLaunchWidget->addItem("MP: Rift (mp_conduit)", "mp_conduit");
-	mQuickLaunchWidget->addItem("MP: Spire (mp_aerospace)", "mp_aerospace");
-	mQuickLaunchWidget->addItem("MP: Verge (mp_banzai)", "mp_banzai");
-	mQuickLaunchWidget->addItem("MP: Rumble (mp_arena)", "mp_arena");
-	mQuickLaunchWidget->addItem("MP: Berserk (mp_shrine)", "mp_shrine");
-	mQuickLaunchWidget->addItem("MP: Cryogen (mp_cryogen)", "mp_cryogen");
-	mQuickLaunchWidget->addItem("MP: Empire (mp_rome)", "mp_rome");
-	mQuickLaunchWidget->addItem("MP: Micro (mp_miniature)", "mp_miniature");
-	mQuickLaunchWidget->addItem("MP: Rupture (mp_city)", "mp_city");
-	mQuickLaunchWidget->addItem("MP: Outlaw (mp_western)", "mp_western");
-	mQuickLaunchWidget->addItem("MP: Citadel (mp_ruins)", "mp_ruins");
-	mQuickLaunchWidget->insertSeparator(mQuickLaunchWidget->count());
-	mQuickLaunchWidget->addItem("Campaign Safehouse: Mobile (cp_sh_mobile)", "cp_sh_mobile");
-	mQuickLaunchWidget->addItem("Campaign Safehouse: Singapore (cp_sh_singapore)", "cp_sh_singapore");
-	mQuickLaunchWidget->addItem("Campaign Safehouse: Cairo (cp_sh_cairo)", "cp_sh_cairo");
-	mQuickLaunchWidget->insertSeparator(mQuickLaunchWidget->count());
-	mQuickLaunchWidget->addItem("Campaign: Black Ops (cp_mi_eth_prologue)", "cp_mi_eth_prologue");
-	mQuickLaunchWidget->addItem("Campaign: New World (cp_mi_zurich_newworld)", "cp_mi_zurich_newworld");
-	mQuickLaunchWidget->addItem("Campaign: In Darkness (cp_mi_sing_blackstation)", "cp_mi_sing_blackstation");
-	mQuickLaunchWidget->addItem("Campaign: Provocation (cp_mi_sing_biodomes)", "cp_mi_sing_biodomes");
-	mQuickLaunchWidget->addItem("Campaign: Hypocenter (cp_mi_sing_sgen)", "cp_mi_sing_sgen");
-	mQuickLaunchWidget->addItem("Campaign: Vengeance (cp_mi_sing_vengeance)", "cp_mi_sing_vengeance");
-	mQuickLaunchWidget->addItem("Campaign: Rise & Fall (cp_mi_cairo_ramses)", "cp_mi_cairo_ramses");
-	mQuickLaunchWidget->addItem("Campaign: Demon Within (cp_mi_cairo_infection)", "cp_mi_cairo_infection");
-	mQuickLaunchWidget->addItem("Campaign: Sand Castle (cp_mi_cairo_aquifer)", "cp_mi_cairo_aquifer");
-	mQuickLaunchWidget->addItem("Campaign: Lotus Towers (cp_mi_cairo_lotus)", "cp_mi_cairo_lotus");
-	mQuickLaunchWidget->addItem("Campaign: Life (cp_mi_zurich_coalescence)", "cp_mi_zurich_coalescence");
-	mQuickLaunchWidget->insertSeparator(mQuickLaunchWidget->count());
-	mQuickLaunchWidget->addItem("Freerun: Alpha (mp_freerun_01)", "mp_freerun_01");
-	mQuickLaunchWidget->addItem("Freerun: Sidewinder (mp_freerun_02)", "mp_freerun_02");
-	mQuickLaunchWidget->addItem("Freerun: Infected (mp_freerun_03)", "mp_freerun_03");
-	mQuickLaunchWidget->addItem("Freerun: Blackout (mp_freerun_04)", "mp_freerun_04");
-	for (int QuickLaunchIdx = 0; QuickLaunchIdx < mQuickLaunchWidget->count(); QuickLaunchIdx++)
-	{
-		const QString MapCode = mQuickLaunchWidget->itemData(QuickLaunchIdx).toString();
-		if (MapCode.isEmpty())
-			continue;
-		QString Text = mQuickLaunchWidget->itemText(QuickLaunchIdx);
-		Text.remove(QRegularExpression("^[^:]+:\\s*"));
-		Text.remove(QRegularExpression("\\s*\\([^\\)]*\\)$"));
-		mQuickLaunchWidget->setItemText(QuickLaunchIdx, Text);
-	}
-	if (mQuickLaunchWidget->view())
-	{
-		mQuickLaunchWidget->view()->setMinimumWidth(250);
-		mQuickLaunchWidget->view()->setMinimumHeight(320);
-	}
-	connect(mQuickLaunchWidget, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int Index)
-	{
-		QStringList ExistingArgs = mRunOptionsWidget->text().split(' ', Qt::SkipEmptyParts);
-		for (int ArgIdx = ExistingArgs.count() - 1; ArgIdx >= 0; ArgIdx--)
-		{
-			if (ExistingArgs[ArgIdx] == "+devmap")
-			{
-				ExistingArgs.removeAt(ArgIdx);
-				if (ArgIdx < ExistingArgs.count())
-					ExistingArgs.removeAt(ArgIdx);
-			}
-		}
-
-		const QString MapCode = mQuickLaunchWidget->itemData(Index).toString();
-		if (MapCode.isEmpty())
-		{
-			mRunOptionsWidget->setText(ExistingArgs.join(' '));
-			return;
-		}
-
-		ExistingArgs << "+devmap" << MapCode;
-		mRunOptionsWidget->setText(ExistingArgs.join(' '));
-	});
+	mQuickLaunchWidget = new QuickLaunchPicker();
+	AppendStartupTrace("ctor:quick-launch-widget-created");
+	mQuickLaunchWidget->setMinimumWidth(0);
+	mQuickLaunchWidget->SetControlHeights(34, 340);
+	mQuickLaunchWidget->SetPopulateEntriesHandler([this]() { PopulateQuickLaunchEntries(); });
+	mQuickLaunchWidget->SetPopulateWorkshopEntriesHandler([this]() { PopulateWorkshopQuickLaunchEntries(); });
 	ActionsLayout->addWidget(mQuickLaunchWidget);
+	mStartupQuoteLabel = new QLabel();
+	mStartupQuoteLabel->setObjectName("StartupQuoteLabel");
+	mStartupQuoteLabel->setWordWrap(true);
+	mStartupQuoteLabel->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+	mStartupQuoteLabel->hide();
+	ActionsLayout->addWidget(mStartupQuoteLabel);
+	UpdateQuickLaunchVisibility();
 
 	QLabel* BuildActionsLabel = new QLabel("Build Actions");
 	ActionsLayout->addWidget(BuildActionsLabel);
 
-	mBuildButton = new QPushButton("Build");
-	mBuildButton->setObjectName("BuildButton");
-	connect(mBuildButton, SIGNAL(clicked()), mActionEditBuild, SLOT(trigger()));
-	ActionsLayout->addWidget(mBuildButton);
-
-	mBuildAllLanguagesButton = new QPushButton("Build (English)");
+	mBuildAllLanguagesButton = new QPushButton(QString("Build (%1)").arg(mBuildLanguage.compare("All", Qt::CaseInsensitive) == 0 ? QString("English") : mBuildLanguage));
 	mBuildAllLanguagesButton->setObjectName("BuildEnglishButton");
 	connect(mBuildAllLanguagesButton, SIGNAL(clicked()), mActionEditBuildAllLanguages, SLOT(trigger()));
 	ActionsLayout->addWidget(mBuildAllLanguagesButton);
+
+	mBuildButton = new QPushButton("Build (All)");
+	mBuildButton->setObjectName("BuildButton");
+	connect(mBuildButton, SIGNAL(clicked()), mActionEditBuild, SLOT(trigger()));
+	ActionsLayout->addWidget(mBuildButton);
 	UpdateBuildActionButtons();
 
 	mDvarsButton = new QPushButton("Dvars");
@@ -1646,7 +3357,7 @@ mlMainWindow::mlMainWindow()
 		QMessageBox::information(this, "Online Mode Guide",
 			RunOnlineToolTip + "\n\n"
 			"Use this when you want the game to launch through Steam instead of the direct executable. "
-			"That helps custom maps and mods show up correctly in online mode.\n\n"
+			"That helps custom maps and mods show up correctly in online mode. Workshop quick-launch maps use this route automatically.\n\n"
 			"Leave it off if you want the normal direct launch behavior.");
 	};
 	mRunOnlineWidget = new QCheckBox("Online Mode");
@@ -1655,6 +3366,15 @@ mlMainWindow::mlMainWindow()
 		mRunOnlineWidget->setChecked(Settings.value("RunOnlineMode").toBool());
 	else
 		Settings.setValue("RunOnlineMode", false);
+	const bool ShowStartupQuote = Settings.contains("ShowStartupQuote") ? Settings.value("ShowStartupQuote").toBool() : false;
+	if (!Settings.contains("ShowStartupQuote"))
+		Settings.setValue("ShowStartupQuote", false);
+	mStartupQuoteText = ShowStartupQuote ? RandomStartupQuote() : QString();
+	if (mStartupQuoteLabel)
+	{
+		mStartupQuoteLabel->setText(mStartupQuoteText);
+		mStartupQuoteLabel->setVisible(ShowStartupQuote);
+	}
 	QWidget* RunOnlineRow = new QWidget();
 	QHBoxLayout* RunOnlineLayout = new QHBoxLayout(RunOnlineRow);
 	RunOnlineLayout->setContentsMargins(0, 0, 0, 0);
@@ -1671,9 +3391,57 @@ mlMainWindow::mlMainWindow()
 	RunOnlineLayout->addStretch(1);
 	ActionsLayout->addWidget(RunOnlineRow);
 	connect(mRunOnlineWidget, &QCheckBox::toggled, this, [=](bool Checked) { QSettings().setValue("RunOnlineMode", Checked); });
+	mQuickLaunchWidget->SetSelectionChangedHandler([=](const QString& MapCode, const QString& WorkshopId)
+	{
+		if (mQuickLaunchWidget && mQuickLaunchWidget->IsWorkshopSelection() && mRunOnlineWidget && !mRunOnlineWidget->isChecked())
+			mRunOnlineWidget->setChecked(true);
 
-	ActionsLayout->addStretch(1);
+		QStringList ExistingArgs = mRunOptionsWidget->text().split(' ', Qt::SkipEmptyParts);
+		for (int ArgIdx = ExistingArgs.count() - 1; ArgIdx >= 0; ArgIdx--)
+		{
+			if (ExistingArgs[ArgIdx] == "+devmap")
+			{
+				ExistingArgs.removeAt(ArgIdx);
+				if (ArgIdx < ExistingArgs.count())
+					ExistingArgs.removeAt(ArgIdx);
+				continue;
+			}
+			if (ExistingArgs[ArgIdx] == "+set" && ArgIdx + 1 < ExistingArgs.count()
+				&& (ExistingArgs[ArgIdx + 1] == "fs_game" || ExistingArgs[ArgIdx + 1] == "workshopid"))
+			{
+				const int RemoveCount = qMin(3, ExistingArgs.count() - ArgIdx);
+				for (int RemoveIdx = 0; RemoveIdx < RemoveCount; RemoveIdx++)
+					ExistingArgs.removeAt(ArgIdx);
+				continue;
+			}
+			if (ExistingArgs[ArgIdx] == "+workshopid")
+			{
+				ExistingArgs.removeAt(ArgIdx);
+				if (ArgIdx < ExistingArgs.count())
+					ExistingArgs.removeAt(ArgIdx);
+			}
+		}
 
+		if (MapCode.isEmpty())
+		{
+			mRunOptionsWidget->setText(ExistingArgs.join(' '));
+			return;
+		}
+
+		if (mQuickLaunchWidget && mQuickLaunchWidget->IsWorkshopSelection())
+		{
+			ExistingArgs << "+set" << "fs_game" << "mod";
+			if (!WorkshopId.trimmed().isEmpty())
+				ExistingArgs << "+set" << "workshopid" << WorkshopId.trimmed();
+		}
+		else
+		{
+			ExistingArgs << "+devmap" << MapCode;
+		}
+		mRunOptionsWidget->setText(ExistingArgs.join(' '));
+	});
+
+	ActionsLayout->addSpacing(4);
 	QLabel* GameControlLabel = new QLabel("Game Control");
 	ActionsLayout->addWidget(GameControlLabel);
 	mCloseGameButton = new QPushButton("Close Game");
@@ -1681,6 +3449,7 @@ mlMainWindow::mlMainWindow()
 	{
 		if (mGameRunningState != GameNotRunning)
 		{
+			mPendingLaunchRequestedMs = 0;
 			QProcess::execute("taskkill", QStringList() << "/IM" << "BlackOps3.exe" << "/F");
 			UpdateGameRunningState();
 			return;
@@ -1693,9 +3462,11 @@ mlMainWindow::mlMainWindow()
 		const int ItemType = Item->data(0, Qt::UserRole).toInt();
 		const QString MapName = (ItemType == ML_ITEM_MAP) ? GetItemEntryName(Item) : QString();
 		const QString FsGame = (ItemType == ML_ITEM_MAP) ? GetItemEntryName(Item) : GetItemContainerName(Item);
+		QueueGameStatsForItem(GetItemFavoriteKey(Item));
 		TouchRecentEntry(RecentEntryForItem(ItemType, GetItemContainerName(Item), GetItemEntryName(Item)));
 		const QPair<QString, QStringList> LaunchCommand = CreateGameLaunchCommand(FsGame, MapName);
-		if (mRunOnlineWidget && mRunOnlineWidget->isChecked())
+		mPendingLaunchRequestedMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 1;
+		if (ShouldUseSteamOnlineLaunch())
 			ShowOnlineLaunchProgressDialog(ItemType == ML_ITEM_MAP ? QString("map '%1'").arg(MapName) : QString("mod '%1'").arg(FsGame));
 		QProcess::startDetached(LaunchCommand.first, LaunchCommand.second, QFileInfo(LaunchCommand.first).absolutePath());
 		UpdateGameRunningState();
@@ -1705,6 +3476,8 @@ mlMainWindow::mlMainWindow()
 	mCloseGameStatusLabel->setObjectName("GameStateLabel");
 	mCloseGameStatusLabel->setWordWrap(true);
 	ActionsLayout->addWidget(mCloseGameStatusLabel);
+
+	ActionsLayout->addStretch(1);
 
 	mOutputWidget = new QTreeWidget(this);
 	mOutputWidget->setObjectName("OutputConsole");
@@ -1761,10 +3534,11 @@ mlMainWindow::mlMainWindow()
 	OutputPanelLayout->setContentsMargins(0, 0, 0, 0);
 	OutputPanelLayout->setSpacing(0);
 	mOutputTabs = new QTabBar(mOutputPanel);
-	mOutputTabs->setObjectName("CategoryTabs");
+	mOutputTabs->setObjectName("OutputTabs");
 	mOutputTabs->setDocumentMode(true);
 	mOutputTabs->setExpanding(false);
 	mOutputTabs->setDrawBase(false);
+	mOutputTabs->setMovable(true);
 	mOutputTabs->setUsesScrollButtons(true);
 	mOutputTabs->setElideMode(Qt::ElideRight);
 	mOutputTabs->addTab("Full");
@@ -1816,52 +3590,201 @@ mlMainWindow::mlMainWindow()
 		});
 	}
 	mLogFiltersButton->setMenu(LogFiltersMenu);
-	mLogSelectionButton = new QToolButton(this);
-	mLogSelectionButton->setObjectName("LogFiltersButton");
-	mLogSelectionButton->setText("Text Select");
-	mLogSelectionButton->setCheckable(true);
-	mLogSelectionButton->setToolTip("Switch to a full-text console view for drag selection and copy.");
-	connect(mLogSelectionButton, &QToolButton::toggled, this, [=](bool Enabled)
-	{
-		mOutputSelectionMode = Enabled;
-		UpdateOutputConsoleMode();
-	});
 	OutputPanelLayout->addWidget(mOutputTabs, 0);
 	OutputPanelLayout->addWidget(mOutputWidget, 1);
 	OutputPanelLayout->addWidget(mOutputPlainWidget, 1);
+	mAssetDockWidget = new QDockWidget("Map/Mods List", this);
+	mAssetDockWidget->setObjectName("AssetDockWidget");
+	mAssetDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
+	mAssetDockWidget->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+	mAssetDockWidget->setWidget(mLeftPanel);
+	mOutputDockWidget = new QDockWidget("Console", this);
+	mOutputDockWidget->setObjectName("OutputDockWidget");
+	mOutputDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
+	mOutputDockWidget->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+	mOutputDockWidget->setWidget(mOutputPanel);
+	setDockNestingEnabled(true);
+	setDockOptions(dockOptions() | QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
 	ApplyLauncherLayout();
+	AppendStartupTrace("ctor:layout-applied");
 
-	setCentralWidget(mCentralWidgetSplitter);
-	QLabel* FooterVersionLabel = new QLabel("Current update version: 1.0.0", this);
-	FooterVersionLabel->setObjectName("FooterStatusLabel");
+	setCentralWidget(mTopWidget);
+	AppendStartupTrace("ctor:central-widget-set");
+	mFooterRefreshButton = new QToolButton(this);
+	mFooterRefreshButton->setObjectName("FooterRefreshButton");
+	mFooterRefreshButton->setIcon(style()->standardIcon(QStyle::SP_BrowserReload));
+	mFooterRefreshButton->setToolTip("Check for launcher updates");
+	mFooterRefreshButton->setAutoRaise(true);
+	connect(mFooterRefreshButton, &QToolButton::clicked, this, &mlMainWindow::OnCheckForUpdates);
+	mFooterUpdateStatusLabel = new QLabel(QString("v%1 - Up to date").arg(kLauncherVersion), this);
+	mFooterUpdateStatusLabel->setObjectName("FooterStatusLabel");
+	mFooterDownloadButton = new QPushButton("Download", this);
+	mFooterDownloadButton->setObjectName("FooterDownloadButton");
+	mFooterDownloadButton->setVisible(false);
+	connect(mFooterDownloadButton, &QPushButton::clicked, this, [this]()
+	{
+		if (mAvailableUpdateUrl.trimmed().isEmpty())
+		{
+			if (!mAvailableReleasePageUrl.trimmed().isEmpty())
+				QDesktopServices::openUrl(QUrl(mAvailableReleasePageUrl));
+			return;
+		}
+
+		SetFooterUpdateState(QString("Downloading %1...").arg(mAvailableUpdateVersion), mAvailableUpdateUrl, mAvailableUpdateVersion, mAvailableReleasePageUrl, true);
+		StartUpdateDownload(QUrl(mAvailableUpdateUrl), mAvailableUpdateVersion);
+	});
 	QLabel* FooterCreditsLabel = new QLabel("Edits by Sphynx", this);
 	FooterCreditsLabel->setObjectName("FooterStatusLabel");
-	statusBar()->addWidget(FooterVersionLabel, 0);
-	statusBar()->addPermanentWidget(mLogSelectionButton, 0);
+	const QString FooterDropdownStyle =
+		"QToolButton { background: transparent; border: 0; padding: 0 14px 0 8px; min-height: 18px; }"
+		"QToolButton:hover { background: transparent; border: 0; }"
+		"QToolButton:pressed { background: transparent; border: 0; }"
+		"QToolButton::menu-button { border: 0; width: 12px; }"
+		"QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 2px; }";
+	QToolButton* WindowFiltersButton = new QToolButton(this);
+	WindowFiltersButton->setObjectName("WindowFiltersButton");
+	WindowFiltersButton->setText("Windows");
+	WindowFiltersButton->setPopupMode(QToolButton::InstantPopup);
+	WindowFiltersButton->setStyleSheet(FooterDropdownStyle);
+	QMenu* WindowFiltersMenu = new QMenu(WindowFiltersButton);
+	QAction* ToggleAssetTreeAction = WindowFiltersMenu->addAction("Map/Mods List");
+	ToggleAssetTreeAction->setCheckable(true);
+	ToggleAssetTreeAction->setChecked(mAssetDockWidget && mAssetDockWidget->isVisible());
+	QAction* ToggleConsoleAction = WindowFiltersMenu->addAction("Console / Log");
+	ToggleConsoleAction->setCheckable(true);
+	ToggleConsoleAction->setChecked(mOutputDockWidget && mOutputDockWidget->isVisible());
+	connect(ToggleAssetTreeAction, &QAction::toggled, this, [=](bool Visible)
+	{
+		if (!mAssetDockWidget)
+			return;
+		mAssetDockWidget->setVisible(Visible);
+		if (Visible)
+			mAssetDockWidget->raise();
+	});
+	connect(ToggleConsoleAction, &QAction::toggled, this, [=](bool Visible)
+	{
+		if (!mOutputDockWidget)
+			return;
+		mOutputDockWidget->setVisible(Visible);
+		if (Visible)
+			mOutputDockWidget->raise();
+	});
+	connect(mAssetDockWidget, &QDockWidget::visibilityChanged, this, [=](bool Visible)
+	{
+		QSignalBlocker Blocker(ToggleAssetTreeAction);
+		ToggleAssetTreeAction->setChecked(Visible);
+	});
+	connect(mOutputDockWidget, &QDockWidget::visibilityChanged, this, [=](bool Visible)
+	{
+		QSignalBlocker Blocker(ToggleConsoleAction);
+		ToggleConsoleAction->setChecked(Visible);
+	});
+	WindowFiltersButton->setMenu(WindowFiltersMenu);
+	QToolButton* ConsoleDisplayButton = new QToolButton(this);
+	ConsoleDisplayButton->setObjectName("ConsoleDisplayButton");
+	ConsoleDisplayButton->setText("Console Display");
+	ConsoleDisplayButton->setPopupMode(QToolButton::InstantPopup);
+	ConsoleDisplayButton->setStyleSheet(FooterDropdownStyle);
+	QMenu* ConsoleDisplayMenu = new QMenu(ConsoleDisplayButton);
+	QActionGroup* ConsoleColorCodingGroup = new QActionGroup(ConsoleDisplayMenu);
+	ConsoleColorCodingGroup->setExclusive(true);
+	QAction* ColorCodingEnabledAction = ConsoleDisplayMenu->addAction("Color Coding: Enabled");
+	ColorCodingEnabledAction->setCheckable(true);
+	ColorCodingEnabledAction->setActionGroup(ConsoleColorCodingGroup);
+	QAction* ColorCodingDisabledAction = ConsoleDisplayMenu->addAction("Color Coding: Disabled");
+	ColorCodingDisabledAction->setCheckable(true);
+	ColorCodingDisabledAction->setActionGroup(ConsoleColorCodingGroup);
+	const bool ConsoleColorCodingEnabled = Settings.value("ConsoleColorCodingEnabled", true).toBool();
+	ColorCodingEnabledAction->setChecked(ConsoleColorCodingEnabled);
+	ColorCodingDisabledAction->setChecked(!ConsoleColorCodingEnabled);
+	connect(ColorCodingEnabledAction, &QAction::triggered, this, [=]()
+	{
+		QSettings().setValue("ConsoleColorCodingEnabled", true);
+		UpdateOutputConsoleMode();
+		RebuildOutputFromBuffer();
+	});
+	connect(ColorCodingDisabledAction, &QAction::triggered, this, [=]()
+	{
+		QSettings().setValue("ConsoleColorCodingEnabled", false);
+		UpdateOutputConsoleMode();
+		RebuildOutputFromBuffer();
+	});
+	ConsoleDisplayButton->setMenu(ConsoleDisplayMenu);
+	mLogFiltersButton->setStyleSheet(FooterDropdownStyle);
+	statusBar()->addWidget(mFooterRefreshButton, 0);
+	statusBar()->addWidget(mFooterUpdateStatusLabel, 0);
+	statusBar()->addWidget(mFooterDownloadButton, 0);
+	statusBar()->addPermanentWidget(WindowFiltersButton, 0);
+	statusBar()->addPermanentWidget(ConsoleDisplayButton, 0);
 	statusBar()->addPermanentWidget(mLogFiltersButton, 0);
 	statusBar()->addPermanentWidget(FooterCreditsLabel, 0);
+	SetFooterUpdateState("Up to date");
 
 	mShippedMapList << "mp_aerospace" <<  "mp_apartments" << "mp_arena" << "mp_banzai" << "mp_biodome" << "mp_chinatown" << "mp_city" << "mp_conduit" << "mp_crucible" << "mp_cryogen" << "mp_ethiopia" << "mp_freerun_01" << "mp_freerun_02" << "mp_freerun_03" << "mp_freerun_04" << "mp_havoc" << "mp_infection" << "mp_kung_fu" << "mp_metro" << "mp_miniature" << "mp_nuketown_x" << "mp_redwood" << "mp_rise" << "mp_rome" << "mp_ruins" << "mp_sector" << "mp_shrine" << "mp_skyjacked" << "mp_spire" << "mp_stronghold" << "mp_veiled" << "mp_waterpark" << "mp_western" << "zm_castle" << "zm_factory" << "zm_genesis" << "zm_island" << "zm_levelcommon" << "zm_stalingrad" << "zm_zod";
 
 	Settings.beginGroup("MainWindow");
-	resize(QSize(980, 660));
+	resize(QSize(1280, 1020));
 	move(QPoint(200, 200));
 	restoreGeometry(Settings.value("Geometry").toByteArray());
 	restoreState(Settings.value("State").toByteArray());
 	Settings.endGroup();
+	AppendStartupTrace("ctor:window-state-restored");
 
 	SteamAPI_Init();
+	AppendStartupTrace("ctor:steam-init-called");
 
 	connect(&mTimer, SIGNAL(timeout()), this, SLOT(SteamUpdate()));
 	mTimer.start(1500);
 	UpdateGameRunningState();
+	AppendStartupTrace("ctor:steam-timer-ready");
 
 	UpdateTheme();
+	AppendStartupTrace("ctor:update-theme-done");
 	PopulateFileList();
+	AppendStartupTrace("ctor:populate-file-list-done");
+	QTimer::singleShot(250, this, [this]()
+	{
+		AppendStartupTrace("ctor:delayed-populate-start");
+		PopulateFileList();
+		AppendStartupTrace("ctor:delayed-populate-done");
+	});
+	const bool AutoCheckOnStartup = Settings.value("UpdateCheck/AutoOnStartup", true).toBool();
+	if (AutoCheckOnStartup)
+		QTimer::singleShot(2000, this, [this]() { CheckForUpdates(false); });
+	qApp->installEventFilter(this);
+	AppendStartupTrace("ctor:done");
 }
 
 mlMainWindow::~mlMainWindow()
 {
+	if (mUpdateDownloadReply)
+		mUpdateDownloadReply->abort();
+	if (mUpdateDownloadFile)
+	{
+		if (mUpdateDownloadFile->isOpen())
+			mUpdateDownloadFile->close();
+		delete mUpdateDownloadFile;
+		mUpdateDownloadFile = NULL;
+	}
+}
+
+void mlMainWindow::showEvent(QShowEvent* Event)
+{
+	QMainWindow::showEvent(Event);
+
+	if (mStartupQuotePopupShown)
+		return;
+
+	mStartupQuotePopupShown = true;
+	if (mStartupQuoteText.isEmpty())
+		return;
+
+	QTimer::singleShot(0, this, [this]()
+	{
+		if (!isVisible() || mStartupQuoteText.isEmpty())
+			return;
+		QMessageBox::information(this, "Inspirational Quote", mStartupQuoteText);
+	});
 }
 
 void mlMainWindow::EnsureThemeProfiles()
@@ -1892,7 +3815,7 @@ QString mlMainWindow::CurrentThemeProfileId() const
 {
 	QSettings Settings;
 	QString ThemeProfileId = Settings.value(kThemeProfileSettingKey, BuiltInThemeProfileId(mThemeMode)).toString().trimmed().toLower();
-	return ThemeProfileId.isEmpty() ? QString("original-updated") : ThemeProfileId;
+	return ThemeProfileId.isEmpty() ? QString("original-classic") : ThemeProfileId;
 }
 
 QStringList mlMainWindow::AvailableThemeProfileIds() const
@@ -2024,27 +3947,52 @@ void mlMainWindow::CloseOnlineLaunchProgressDialog()
 
 void mlMainWindow::CreateActions()
 {
-	mActionFileNew = new QAction(QIcon(":/resources/FileNew.png"), "&New...", this);
+	mActionFileNew = new QAction(ToolbarIconForActionKey("file-new"), "&New...", this);
+	mActionFileNew->setObjectName("file-new");
 	mActionFileNew->setShortcut(QKeySequence("Ctrl+N"));
 	connect(mActionFileNew, SIGNAL(triggered()), this, SLOT(OnFileNew()));
 
-	mActionFileAssetEditor = new QAction(QIcon(":/resources/AssetEditor.png"), "&Asset Editor", this);
+	mActionFileAssetEditor = new QAction(ToolbarIconForActionKey("file-asset-editor"), "Asset Editor (APE)", this);
+	mActionFileAssetEditor->setObjectName("file-asset-editor");
 	mActionFileAssetEditor->setShortcut(QKeySequence("Ctrl+A"));
 	connect(mActionFileAssetEditor, SIGNAL(triggered()), this, SLOT(OnFileAssetEditor()));
 
-	mActionFileLevelEditor = new QAction(QIcon(":/resources/Radiant.png"), "Open in &Radiant", this);
+	mActionFileOpenRoot = new QAction(QIcon(QCoreApplication::applicationDirPath() + "/folderIcon.png"), "Open", this);
+	mActionFileOpenRoot->setObjectName("file-open-root");
+	mActionFileOpenRoot->setToolTip("Open the Black Ops 3 root folder");
+	connect(mActionFileOpenRoot, SIGNAL(triggered()), this, SLOT(OnOpenModRootFolder()));
+
+	mActionFileOpenConsoleLog = new QAction(style()->standardIcon(QStyle::SP_FileIcon), "Open console_mp.log", this);
+	mActionFileOpenConsoleLog->setObjectName("file-open-console-log");
+	mActionFileOpenConsoleLog->setToolTip("Open console_mp.log in the launcher");
+	connect(mActionFileOpenConsoleLog, SIGNAL(triggered()), this, SLOT(OnOpenConsoleLog()));
+
+	mActionFileOpenConsoleLogExternal = new QAction(style()->standardIcon(QStyle::SP_FileDialogListView), "Open console_mp.log in Editor", this);
+	mActionFileOpenConsoleLogExternal->setObjectName("file-open-console-log-editor");
+	mActionFileOpenConsoleLogExternal->setToolTip("Open console_mp.log in the default text editor");
+	connect(mActionFileOpenConsoleLogExternal, SIGNAL(triggered()), this, SLOT(OnOpenConsoleLogExternal()));
+
+	mActionFileOpenScriptReference = new QAction(ToolbarIconForActionKey("help-script-reference"), "BO3 Script Reference", this);
+	mActionFileOpenScriptReference->setObjectName("help-script-reference");
+	mActionFileOpenScriptReference->setToolTip("Open the BO3 Script Reference website");
+	connect(mActionFileOpenScriptReference, SIGNAL(triggered()), this, SLOT(OnOpenScriptReference()));
+
+	mActionFileLevelEditor = new QAction(ToolbarIconForActionKey("file-level-editor"), "Open Radiant", this);
+	mActionFileLevelEditor->setObjectName("file-level-editor");
 	mActionFileLevelEditor->setShortcut(QKeySequence("Ctrl+R"));
 	mActionFileLevelEditor->setToolTip("Level Editor");
 	connect(mActionFileLevelEditor, SIGNAL(triggered()), this, SLOT(OnFileLevelEditor()));
 
-	mActionFileExport2Bin = new QAction(QIcon(":/resources/Export2Bin.png"), "&Export2Bin GUI", this);
+	mActionFileExport2Bin = new QAction(ToolbarIconForActionKey("file-export2bin"), "Export2Bin GUI", this);
+	mActionFileExport2Bin->setObjectName("file-export2bin");
 	mActionFileExport2Bin->setShortcut(QKeySequence("Ctrl+E"));
 	connect(mActionFileExport2Bin, SIGNAL(triggered()), this, SLOT(OnFileExport2Bin()));
 
 	mActionFileExit = new QAction("E&xit", this);
 	connect(mActionFileExit, SIGNAL(triggered()), this, SLOT(close()));
 
-	mActionEditBuild = new QAction(QIcon(":/resources/Go.png"), "Build", this);
+	mActionEditBuild = new QAction(ToolbarIconForActionKey("edit-build"), "Build", this);
+	mActionEditBuild->setObjectName("edit-build");
 	mActionEditBuild->setShortcut(QKeySequence("Ctrl+B"));
 	connect(mActionEditBuild, SIGNAL(triggered()), this, SLOT(OnEditBuild()));
 
@@ -2052,27 +4000,86 @@ void mlMainWindow::CreateActions()
 	mActionEditBuildAllLanguages->setShortcut(QKeySequence("Ctrl+Shift+B"));
 	connect(mActionEditBuildAllLanguages, SIGNAL(triggered()), this, SLOT(OnEditBuildAllLanguages()));
 
-	mActionEditReadyForPublish = new QAction(QIcon(":/resources/upload.png"), "Ready for Publish", this);
+	mActionEditAnalyze = new QAction(ToolbarIconForActionKey("edit-analyze"), "Analyze", this);
+	mActionEditAnalyze->setObjectName("edit-analyze");
+	connect(mActionEditAnalyze, SIGNAL(triggered()), this, SLOT(OnAnalyzeItem()));
+
+	mActionEditInformation = new QAction(style()->standardIcon(QStyle::SP_FileDialogInfoView), "Information", this);
+	mActionEditInformation->setObjectName("edit-information");
+	connect(mActionEditInformation, &QAction::triggered, this, [this]()
+	{
+		ShowItemInformationDialog(ActiveFileItem());
+	});
+
+	mActionEditReadyForPublish = new QAction(ToolbarIconForActionKey("edit-ready-for-publish"), "Publish Check", this);
+	mActionEditReadyForPublish->setObjectName("edit-ready-for-publish");
 	connect(mActionEditReadyForPublish, SIGNAL(triggered()), this, SLOT(OnEditReadyForPublish()));
 
-	mActionEditPublish = new QAction(QIcon(":/resources/upload.png"), "Publish", this);
+	mActionEditPublish = new QAction(ToolbarIconForActionKey("edit-publish"), "Publish", this);
+	mActionEditPublish->setObjectName("edit-publish");
 	mActionEditPublish->setShortcut(QKeySequence("Ctrl+P"));
 	connect(mActionEditPublish, SIGNAL(triggered()), this, SLOT(OnEditPublish()));
 
 	mActionEditOptions = new QAction("&Options...", this);
 	connect(mActionEditOptions, SIGNAL(triggered()), this, SLOT(OnEditOptions()));
 
+	mActionHelpCheckUpdates = new QAction("Check for &Updates...", this);
+	connect(mActionHelpCheckUpdates, SIGNAL(triggered()), this, SLOT(OnCheckForUpdates()));
+	
+	mActionHelpCredits = new QAction("&Credits...", this);
+	connect(mActionHelpCredits, SIGNAL(triggered()), this, SLOT(OnHelpCredits()));
+	
 	mActionHelpAbout = new QAction("&About...", this);
 	connect(mActionHelpAbout, SIGNAL(triggered()), this, SLOT(OnHelpAbout()));
+
+	mActionHelpGuide = new QAction("&Guide / What's New...", this);
+	connect(mActionHelpGuide, SIGNAL(triggered()), this, SLOT(OnHelpGuide()));
 }
 
 void mlMainWindow::CreateMenu()
 {
 	QMenuBar* MenuBar = new QMenuBar(this);
+	auto BuildOpenMenu = [this](QWidget* Parent) -> QMenu*
+	{
+		QMenu* OpenMenu = new QMenu("Open", Parent);
+		struct OpenFolderEntry
+		{
+			const char* Label;
+			const char* RelativePath;
+		};
+		const OpenFolderEntry Entries[] =
+		{
+			{ "Root", "" },
+			{ "Mods", "mods" },
+			{ "Usermaps", "usermaps" },
+			{ "source_data", "source_data" },
+			{ "raw", "raw" },
+			{ "texture_assets", "texture_assets" },
+			{ "model_export", "model_export" }
+		};
+		for (int EntryIdx = 0; EntryIdx < static_cast<int>(sizeof(Entries) / sizeof(Entries[0])); EntryIdx++)
+		{
+			const QString FolderPath = Entries[EntryIdx].RelativePath[0] == '\0'
+				? QDir::cleanPath(mGamePath)
+				: QDir::cleanPath(QString("%1/%2").arg(mGamePath, Entries[EntryIdx].RelativePath));
+			if (!QFileInfo(FolderPath).exists())
+				continue;
 
+			QAction* OpenAction = OpenMenu->addAction(Entries[EntryIdx].Label);
+			connect(OpenAction, &QAction::triggered, this, [FolderPath]()
+			{
+				ShellExecute(NULL, "open", QString("\"%1\"").arg(FolderPath).toLatin1().constData(), "", NULL, SW_SHOWDEFAULT);
+			});
+		}
+		return OpenMenu;
+	};
+	
 	QMenu* FileMenu = new QMenu("&File", MenuBar);
 	FileMenu->addAction(mActionFileNew);
 	FileMenu->addSeparator();
+	FileMenu->addMenu(BuildOpenMenu(FileMenu));
+	FileMenu->addAction(mActionFileOpenConsoleLog);
+	FileMenu->addAction(mActionFileOpenConsoleLogExternal);
 	FileMenu->addAction(mActionFileAssetEditor);
 	FileMenu->addAction(mActionFileLevelEditor);
 	FileMenu->addAction(mActionFileExport2Bin);
@@ -2083,6 +4090,8 @@ void mlMainWindow::CreateMenu()
 	QMenu* EditMenu = new QMenu("&Edit", MenuBar);
 	EditMenu->addAction(mActionEditBuild);
 	EditMenu->addAction(mActionEditBuildAllLanguages);
+	EditMenu->addAction(mActionEditAnalyze);
+	EditMenu->addAction(mActionEditInformation);
 	EditMenu->addAction(mActionEditReadyForPublish);
 	EditMenu->addAction(mActionEditPublish);
 	MenuBar->addAction(EditMenu->menuAction());
@@ -2106,6 +4115,12 @@ void mlMainWindow::CreateMenu()
 	MenuBar->addAction(OptionsMenu->menuAction());
 
 	QMenu* HelpMenu = new QMenu("&Help", MenuBar);
+	HelpMenu->addAction(mActionHelpGuide);
+	HelpMenu->addSeparator();
+	HelpMenu->addAction(mActionHelpCheckUpdates);
+	HelpMenu->addAction(mActionFileOpenScriptReference);
+	HelpMenu->addSeparator();
+	HelpMenu->addAction(mActionHelpCredits);
 	HelpMenu->addAction(mActionHelpAbout);
 	MenuBar->addAction(HelpMenu->menuAction());
 
@@ -2115,28 +4130,127 @@ void mlMainWindow::CreateMenu()
 
 void mlMainWindow::CreateToolBar()
 {
+	if (mMainToolBar)
+	{
+		removeToolBar(mMainToolBar);
+		mMainToolBar->deleteLater();
+		mMainToolBar = NULL;
+	}
+
 	QToolBar* ToolBar = new QToolBar("Standard", this);
 	ToolBar->setObjectName(QStringLiteral("StandardToolBar"));
 	ToolBar->setMovable(false);
 	ToolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-	ToolBar->setIconSize(QSize(20, 20));
-	ToolBar->setContentsMargins(0, 4, 0, 2);
+	ToolBar->setIconSize(QSize(18, 18));
+	ToolBar->setContentsMargins(0, 1, 0, 0);
 
-	ToolBar->addAction(mActionFileNew);
-	ToolBar->addAction(mActionEditBuild);
-	ToolBar->addAction(mActionEditReadyForPublish);
-	ToolBar->addAction(mActionEditPublish);
-	ToolBar->addSeparator();
-	ToolBar->addAction(mActionFileAssetEditor);
-	ToolBar->addAction(mActionFileLevelEditor);
-	ToolBar->addAction(mActionFileExport2Bin);
+	const QList<ToolbarItemConfig> ToolbarItems = LoadToolbarItems();
+	bool HasAnyVisibleItems = false;
+	bool AddedExtraToolsButton = false;
+	auto AddExtraToolsButton = [&]()
+	{
+		QToolButton* ExtraToolsButton = new QToolButton(ToolBar);
+		ExtraToolsButton->setObjectName("ExtraToolsDropDownButton");
+		ExtraToolsButton->setIcon(ToolbarIconForActionKey("extra-tools-menu"));
+		ExtraToolsButton->setText("Extra Tools");
+		ExtraToolsButton->setPopupMode(QToolButton::InstantPopup);
+		ExtraToolsButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+		ExtraToolsButton->setStyleSheet(
+			"QToolButton { margin: 0; padding: 6px 8px 5px 8px; border: 1px solid transparent; }"
+			"QToolButton:hover { margin: 0; padding: 6px 8px 5px 8px; background: rgba(255, 255, 255, 0.10); border: 1px solid #6a6a6a; }"
+			"QToolButton:pressed { margin: 0; padding: 6px 8px 5px 8px; background: rgba(255, 255, 255, 0.16); border: 1px solid #7a7a7a; }"
+			"QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: top right; right: 4px; top: 4px; width: 10px; height: 10px; image: url(:/stylesheet/stylesheet/down_arrow.png); }"
+			"QToolButton::menu-button { width: 14px; border: 0; }");
+		QMenu* ExtraToolsMenu = new QMenu(ExtraToolsButton);
+		ExtraToolsMenu->setStyleSheet(
+			"QMenu::item { padding: 10px 18px 10px 40px; }"
+			"QMenu::icon { left: 12px; }"
+			"QMenu::right-arrow { width: 12px; height: 12px; margin-right: 6px; }");
+		ExtraToolsMenu->addAction(mActionFileExport2Bin);
+		QMenu* OpenLogsMenu = ExtraToolsMenu->addMenu(style()->standardIcon(QStyle::SP_FileDialogDetailedView), "Open Logs");
+		OpenLogsMenu->setStyleSheet(ExtraToolsMenu->styleSheet());
+		OpenLogsMenu->addAction(mActionFileOpenConsoleLog);
+		OpenLogsMenu->addAction(mActionFileOpenConsoleLogExternal);
+		ExtraToolsMenu->addAction(mActionFileOpenScriptReference);
+		ExtraToolsButton->setMenu(ExtraToolsMenu);
+		ToolBar->addWidget(ExtraToolsButton);
+		HasAnyVisibleItems = true;
+		AddedExtraToolsButton = true;
+	};
+	auto ShouldInsertGroupSeparatorBefore = [&](const QString& BuiltInKey) -> bool
+	{
+		return BuiltInKey == "edit-ready-for-publish"
+			|| BuiltInKey == "file-asset-editor"
+			|| BuiltInKey == "extra-tools-menu";
+	};
+	for (int ItemIdx = 0; ItemIdx < ToolbarItems.count(); ItemIdx++)
+	{
+		const ToolbarItemConfig Item = ToolbarItems[ItemIdx];
+		if (Item.Hidden)
+			continue;
+		if (Item.BuiltIn && (Item.BuiltInActionKey == "file-open-console-log-editor"
+			|| Item.BuiltInActionKey == "file-open-console-log"
+			|| Item.BuiltInActionKey == "file-export2bin"
+			|| Item.BuiltInActionKey == "help-script-reference"))
+			continue;
+
+		if (Item.BuiltIn && ShouldInsertGroupSeparatorBefore(Item.BuiltInActionKey) && HasAnyVisibleItems)
+			ToolBar->addSeparator();
+
+		if (Item.BuiltIn)
+		{
+			if (Item.BuiltInActionKey == "extra-tools-menu")
+			{
+				AddExtraToolsButton();
+				continue;
+			}
+
+			QAction* Action = FindBuiltinToolbarAction(this, Item.BuiltInActionKey);
+			if (!Action)
+				continue;
+			if (!Item.IconPath.trimmed().isEmpty() && QFileInfo(Item.IconPath).exists())
+				Action->setIcon(QIcon(Item.IconPath));
+			ToolBar->addAction(Action);
+			HasAnyVisibleItems = true;
+			continue;
+		}
+
+		QIcon ItemIcon;
+		if (!Item.IconPath.trimmed().isEmpty() && QFileInfo(Item.IconPath).exists())
+			ItemIcon = QIcon(Item.IconPath);
+		else
+			ItemIcon = style()->standardIcon(QStyle::SP_FileIcon);
+		QAction* CustomAction = new QAction(ItemIcon, Item.Label.isEmpty() ? QString("Custom Item") : Item.Label, ToolBar);
+		connect(CustomAction, &QAction::triggered, this, [this, Item]()
+		{
+			ExecuteToolbarScript(this, Item.FunctionScript);
+		});
+		ToolBar->addAction(CustomAction);
+		HasAnyVisibleItems = true;
+	}
+
+	if (!AddedExtraToolsButton)
+	{
+		if (HasAnyVisibleItems)
+			ToolBar->addSeparator();
+		AddExtraToolsButton();
+	}
 
 	addToolBar(Qt::TopToolBarArea, ToolBar);
+	mMainToolBar = ToolBar;
 
 	for (QToolButton* Button : ToolBar->findChildren<QToolButton*>())
 	{
-		Button->setMinimumWidth(76);
-		Button->setMinimumHeight(48);
+		if (Button->objectName() == "ExtraToolsDropDownButton")
+		{
+			Button->setMinimumWidth(92);
+			Button->setMaximumWidth(130);
+			Button->setMinimumHeight(38);
+			Button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+			continue;
+		}
+		Button->setMinimumWidth(66);
+		Button->setMinimumHeight(38);
 		Button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 	}
 }
@@ -2163,7 +4277,7 @@ void mlMainWindow::InitExport2BinGUI()
 
 	mExport2BinOverwriteWidget = new QCheckBox("&Overwrite Existing Files", widget);
 	gridLayout->addWidget(mExport2BinOverwriteWidget, 1, 0);
-	
+
 	QSettings Settings;
 	mExport2BinOverwriteWidget->setChecked(Settings.value("Export2Bin_OverwriteFiles", true).toBool());
 
@@ -2195,6 +4309,8 @@ void mlMainWindow::InitExport2BinGUI()
 
 void mlMainWindow::closeEvent(QCloseEvent* Event)
 {
+	UpdateStatsTimers();
+	FlushCurrentItemTime();
 	QSettings Settings;
 	Settings.beginGroup("MainWindow");
 	Settings.setValue("Geometry", saveGeometry());
@@ -2206,6 +4322,21 @@ void mlMainWindow::closeEvent(QCloseEvent* Event)
 
 bool mlMainWindow::eventFilter(QObject* Watched, QEvent* Event)
 {
+	switch (Event->type())
+	{
+	case QEvent::MouseButtonPress:
+	case QEvent::MouseButtonDblClick:
+	case QEvent::Wheel:
+	case QEvent::KeyPress:
+	case QEvent::TouchBegin:
+	case QEvent::TouchUpdate:
+	case QEvent::FocusIn:
+		RecordUserActivity();
+		break;
+	default:
+		break;
+	}
+
 	if ((Watched == mOutputWidget || Watched == (mOutputWidget ? mOutputWidget->viewport() : NULL)) && Event->type() == QEvent::KeyPress)
 	{
 		QKeyEvent* KeyEvent = static_cast<QKeyEvent*>(Event);
@@ -2314,7 +4445,15 @@ void mlMainWindow::UpdateGameRunningState()
 	if (!mCloseGameButton || !mCloseGameStatusLabel)
 		return;
 
+	const GameRunningState PreviousState = mGameRunningState;
 	mGameRunningState = DetectGameRunningState();
+	const qint64 NowMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 0;
+	const bool WaitingForRecentLaunch = mPendingLaunchRequestedMs > 0 && NowMs > 0 && NowMs - mPendingLaunchRequestedMs < 120000;
+	if (mGameRunningState == GameNotRunning && WaitingForRecentLaunch)
+		mGameRunningState = GameStarting;
+	if (mGameRunningState != GameNotRunning)
+		mPendingLaunchRequestedMs = 0;
+	FinalizeGameStatsTransition(PreviousState, mGameRunningState);
 	const bool Running = (mGameRunningState != GameNotRunning);
 	mCachedGameRunning = Running;
 	mCloseGameButton->setEnabled(Running);
@@ -2323,7 +4462,7 @@ void mlMainWindow::UpdateGameRunningState()
 	{
 		mCloseGameButton->setText("Close Game");
 		mCloseGameButton->setEnabled(true);
-		mCloseGameStatusLabel->setText("Game fully open");
+		mCloseGameStatusLabel->setText("Game Running!");
 		mCloseGameStatusLabel->setStyleSheet("color: #44d17a; font-weight: 700;");
 		CloseOnlineLaunchProgressDialog();
 	}
@@ -2331,7 +4470,7 @@ void mlMainWindow::UpdateGameRunningState()
 	{
 		mCloseGameButton->setText("Close Game");
 		mCloseGameButton->setEnabled(true);
-		mCloseGameStatusLabel->setText("Game starting up");
+		mCloseGameStatusLabel->setText("Game starting up...");
 		mCloseGameStatusLabel->setStyleSheet("color: #ff9b42;");
 		if (mPendingOnlineLaunchFeedback && mLaunchProgressDialog)
 		{
@@ -2343,6 +4482,7 @@ void mlMainWindow::UpdateGameRunningState()
 	}
 	else
 	{
+		mPendingLaunchRequestedMs = 0;
 		if (mPendingOnlineLaunchFeedback && mLaunchProgressDialog)
 		{
 			mLaunchProgressDialog->setLabelText(
@@ -2352,26 +4492,94 @@ void mlMainWindow::UpdateGameRunningState()
 		}
 		QTreeWidgetItem* CurrentItem = mFileListWidget ? mFileListWidget->currentItem() : NULL;
 		const int ItemType = CurrentItem ? CurrentItem->data(0, Qt::UserRole).toInt() : ML_ITEM_UNKNOWN;
+		const bool CurrentItemChecked = CurrentItem && CurrentItem->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked;
 		if (ItemType == ML_ITEM_MAP)
 		{
 			mCloseGameButton->setText("Start Map");
-			mCloseGameButton->setEnabled(true);
-			mCloseGameStatusLabel->setText("Launch selected map");
+			mCloseGameButton->setEnabled(CurrentItemChecked);
+			mCloseGameStatusLabel->setText(CurrentItemChecked ? "Launch Map" : "Check the selected map to launch it");
 		}
 		else if (ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP)
 		{
 			mCloseGameButton->setText("Start Mod");
-			mCloseGameButton->setEnabled(true);
-			mCloseGameStatusLabel->setText("Launch selected mod");
+			mCloseGameButton->setEnabled(CurrentItemChecked);
+			mCloseGameStatusLabel->setText(CurrentItemChecked ? "Launch Mod" : "Check the selected mod to launch it");
 		}
 		else
 		{
-			mCloseGameButton->setText("Close Game");
+			mCloseGameButton->setText("Start Game");
 			mCloseGameButton->setEnabled(false);
-			mCloseGameStatusLabel->setText("Game is not running");
+			mCloseGameStatusLabel->setText("Select and check a map or mod to launch it");
 		}
 		mCloseGameStatusLabel->setStyleSheet(QString());
 	}
+}
+
+QString mlMainWindow::ItemContentRoot(int ItemType, const QString& ContainerName, const QString& EntryName) const
+{
+	Q_UNUSED(EntryName);
+	if (ItemType == ML_ITEM_MAP)
+		return QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, ContainerName));
+	if (ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP)
+		return QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, ContainerName));
+	return QString();
+}
+
+quint64 mlMainWindow::ItemDiskSizeBytes(int ItemType, const QString& ContainerName, const QString& EntryName) const
+{
+	const QString RootPath = ItemContentRoot(ItemType, ContainerName, EntryName);
+	if (RootPath.isEmpty())
+		return 0;
+	return DirectorySizeBytes(RootPath);
+}
+
+void mlMainWindow::QueueGameStatsForItem(const QString& FavoriteKey)
+{
+	mPendingGameStatsItemKey = NormalizeStatsItemKey(FavoriteKey);
+	mPendingGameQueuedMs = (mStatsElapsedTimer.isValid() && !mPendingGameStatsItemKey.isEmpty()) ? mStatsElapsedTimer.elapsed() : 0;
+}
+
+void mlMainWindow::FinalizeGameStatsTransition(GameRunningState PreviousState, GameRunningState CurrentState)
+{
+	const qint64 NowMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 0;
+	if (CurrentState == GameNotRunning && !mPendingGameStatsItemKey.isEmpty() && mPendingGameQueuedMs > 0 && NowMs > mPendingGameQueuedMs + 120000)
+	{
+		mPendingGameStatsItemKey.clear();
+		mPendingGameQueuedMs = 0;
+	}
+
+	if (PreviousState == GameNotRunning && CurrentState != GameNotRunning)
+	{
+		mCurrentGameStartedMs = NowMs;
+		if (!mPendingGameStatsItemKey.isEmpty())
+		{
+			mActiveGameStatsItemKey = mPendingGameStatsItemKey;
+			mPendingGameStatsItemKey.clear();
+			mPendingGameQueuedMs = 0;
+			IncrementStat("Stats/TotalGameLaunches");
+			IncrementStat(QString("Stats/ItemsPlayCount/%1").arg(mActiveGameStatsItemKey));
+			QSettings().setValue(QString("Stats/ItemsLastPlayedUtc/%1").arg(mActiveGameStatsItemKey), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+		}
+		else
+			mActiveGameStatsItemKey.clear();
+	}
+
+	if (PreviousState != GameNotRunning && CurrentState == GameNotRunning)
+	{
+		const qint64 DurationSeconds = (mCurrentGameStartedMs > 0 && NowMs > mCurrentGameStartedMs) ? ((NowMs - mCurrentGameStartedMs) / 1000) : 0;
+		AddStatSeconds("Stats/TotalGameSeconds", DurationSeconds);
+		if (!mActiveGameStatsItemKey.isEmpty())
+			AddStatSeconds(QString("Stats/ItemsGameSeconds/%1").arg(mActiveGameStatsItemKey), DurationSeconds);
+		mCurrentGameStartedMs = 0;
+		mActiveGameStatsItemKey.clear();
+	}
+}
+
+bool mlMainWindow::ShouldUseSteamOnlineLaunch() const
+{
+	if (mRunOnlineWidget && mRunOnlineWidget->isChecked())
+		return true;
+	return mQuickLaunchWidget && mQuickLaunchWidget->IsWorkshopSelection();
 }
 
 QString mlMainWindow::SectionSettingKey(const QString& SectionName) const
@@ -2384,6 +4592,191 @@ QString mlMainWindow::SectionSettingKey(const QString& SectionName) const
 QString mlMainWindow::LauncherDataRoot() const
 {
 	return QDir::cleanPath(QString("%1/modtools/launcher_data").arg(mGamePath));
+}
+
+QString mlMainWindow::DefaultScriptsManifestPath() const
+{
+	return QDir::cleanPath(QString("%1/modtools/ModLauncherSrc/resources/default_scripts.txt").arg(mGamePath));
+}
+
+QString mlMainWindow::DefaultUiManifestPath() const
+{
+	return QDir::cleanPath(QString("%1/modtools/ModLauncherSrc/resources/default_ui.txt").arg(mGamePath));
+}
+
+bool mlMainWindow::EnsureDefaultScriptsManifest(QString* Error) const
+{
+	const QString SourceManifestPath = DefaultScriptsManifestPath();
+	if (QFileInfo(SourceManifestPath).isFile() || QFile::exists(":/resources/default_scripts.txt"))
+		return true;
+
+	const QString ManifestPath = QDir::cleanPath(QString("%1/default_scripts.txt").arg(LauncherDataRoot()));
+	if (!QDir().mkpath(QFileInfo(ManifestPath).absolutePath()))
+	{
+		if (Error)
+			*Error = QString("Unable to create '%1'.").arg(QFileInfo(ManifestPath).absolutePath());
+		return false;
+	}
+
+	QStringList Entries;
+	const QString RootPath = QDir::cleanPath(QString("%1/share/raw/scripts").arg(mGamePath));
+	QDir RootDir(RootPath);
+	if (RootDir.exists())
+	{
+		QDirIterator It(RootPath, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString FilePath = It.next();
+			const QString RelativePath = NormalizeDefaultManifestPath(QDir(mGamePath).relativeFilePath(FilePath));
+			if (!RelativePath.isEmpty())
+				Entries << RelativePath;
+		}
+
+		QDirIterator NamespaceIt(RootPath, QStringList() << "*.gsc" << "*.csc", QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+		while (NamespaceIt.hasNext())
+		{
+			const QString FilePath = NamespaceIt.next();
+			QFile ScriptFile(FilePath);
+			if (!ScriptFile.open(QIODevice::ReadOnly))
+				continue;
+
+			const QString RelativePath = NormalizeDefaultManifestPath(QDir(mGamePath).relativeFilePath(FilePath));
+			for (const QString& NamespaceName : ExtractDeclaredNamespaces(QString::fromUtf8(ScriptFile.readAll())))
+				Entries << QString("namespace:%1=%2").arg(NamespaceName, RelativePath);
+		}
+	}
+
+	Entries.removeDuplicates();
+	Entries.sort();
+
+	QFile ManifestFile(ManifestPath);
+	if (!ManifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		if (Error)
+			*Error = QString("Unable to write '%1'.").arg(QDir::toNativeSeparators(ManifestPath));
+		return false;
+	}
+
+	QTextStream Stream(&ManifestFile);
+	for (const QString& Entry : Entries)
+		Stream << Entry << "\n";
+	return true;
+}
+
+bool mlMainWindow::EnsureDefaultUiManifest(QString* Error) const
+{
+	const QString SourceManifestPath = DefaultUiManifestPath();
+	if (QFileInfo(SourceManifestPath).isFile() || QFile::exists(":/resources/default_ui.txt"))
+		return true;
+
+	const QString ManifestPath = QDir::cleanPath(QString("%1/default_ui.txt").arg(LauncherDataRoot()));
+	if (!QDir().mkpath(QFileInfo(ManifestPath).absolutePath()))
+	{
+		if (Error)
+			*Error = QString("Unable to create '%1'.").arg(QFileInfo(ManifestPath).absolutePath());
+		return false;
+	}
+
+	QStringList Entries;
+	const QStringList RootPaths = QStringList()
+		<< QDir::cleanPath(QString("%1/share/raw/ui").arg(mGamePath))
+		<< QDir::cleanPath(QString("%1/share/raw/scripts/ui").arg(mGamePath))
+		<< QDir::cleanPath(QString("%1/share/raw/scripts/lua").arg(mGamePath));
+	for (const QString& RootPath : RootPaths)
+	{
+		QDir RootDir(RootPath);
+		if (!RootDir.exists())
+			continue;
+
+		QDirIterator It(RootPath, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString FilePath = It.next();
+			const QString RelativePath = CanonicalDefaultUiManifestEntry(QDir(mGamePath).relativeFilePath(FilePath));
+			if (!RelativePath.isEmpty())
+				Entries << RelativePath;
+		}
+	}
+
+	Entries.removeDuplicates();
+	Entries.sort();
+
+	QFile ManifestFile(ManifestPath);
+	if (!ManifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		if (Error)
+			*Error = QString("Unable to write '%1'.").arg(QDir::toNativeSeparators(ManifestPath));
+		return false;
+	}
+
+	QTextStream Stream(&ManifestFile);
+	for (const QString& Entry : Entries)
+		Stream << Entry << "\n";
+	return true;
+}
+
+QSet<QString> mlMainWindow::LoadDefaultScriptsManifest(QString* Error) const
+{
+	if (!EnsureDefaultScriptsManifest(Error))
+		return QSet<QString>();
+
+	QString ManifestPath = DefaultScriptsManifestPath();
+	if (!QFileInfo(ManifestPath).isFile())
+	{
+		if (QFile::exists(":/resources/default_scripts.txt"))
+			ManifestPath = ":/resources/default_scripts.txt";
+		else
+			ManifestPath = QDir::cleanPath(QString("%1/default_scripts.txt").arg(LauncherDataRoot()));
+	}
+
+	QFile ManifestFile(ManifestPath);
+	if (!ManifestFile.open(QIODevice::ReadOnly))
+	{
+		if (Error)
+			*Error = QString("Unable to open '%1'.").arg(QDir::toNativeSeparators(ManifestPath));
+		return QSet<QString>();
+	}
+
+	QSet<QString> Entries;
+	while (!ManifestFile.atEnd())
+	{
+		const QString Entry = NormalizeDefaultManifestPath(QString::fromUtf8(ManifestFile.readLine()).trimmed());
+		if (!Entry.isEmpty() && !IsNamespaceManifestEntry(Entry))
+			Entries.insert(Entry);
+	}
+	return Entries;
+}
+
+QSet<QString> mlMainWindow::LoadDefaultUiManifest(QString* Error) const
+{
+	if (!EnsureDefaultUiManifest(Error))
+		return QSet<QString>();
+
+	QString ManifestPath = DefaultUiManifestPath();
+	if (!QFileInfo(ManifestPath).isFile())
+	{
+		if (QFile::exists(":/resources/default_ui.txt"))
+			ManifestPath = ":/resources/default_ui.txt";
+		else
+			ManifestPath = QDir::cleanPath(QString("%1/default_ui.txt").arg(LauncherDataRoot()));
+	}
+
+	QFile ManifestFile(ManifestPath);
+	if (!ManifestFile.open(QIODevice::ReadOnly))
+	{
+		if (Error)
+			*Error = QString("Unable to open '%1'.").arg(QDir::toNativeSeparators(ManifestPath));
+		return QSet<QString>();
+	}
+
+	QSet<QString> Entries;
+	while (!ManifestFile.atEnd())
+	{
+		const QString Entry = NormalizeDefaultManifestPath(QString::fromUtf8(ManifestFile.readLine()).trimmed());
+		if (!Entry.isEmpty())
+			Entries.insert(Entry);
+	}
+	return Entries;
 }
 
 QString mlMainWindow::NotesFilePath(int ItemType, const QString& ContainerName, const QString& EntryName) const
@@ -2471,6 +4864,155 @@ bool mlMainWindow::EditNotesForItem(QTreeWidgetItem* Item)
 
 	File.write(QJsonDocument(Root).toJson(QJsonDocument::Indented));
 	return true;
+}
+
+void mlMainWindow::ShowItemInformationDialog(QTreeWidgetItem* Item)
+{
+	if (!Item)
+		return;
+
+	const int ItemType = Item->data(0, Qt::UserRole).toInt();
+	if (ItemType == ML_ITEM_UNKNOWN)
+		return;
+
+	const QString ContainerName = GetItemContainerName(Item);
+	const QString EntryName = GetItemEntryName(Item);
+	const QString FavoriteKey = NormalizeStatsItemKey(GetItemFavoriteKey(Item));
+	const QString DisplayName = DisplayNameForEntry(FavoriteKey);
+	const QString InternalName = (ItemType == ML_ITEM_MAP) ? EntryName : ContainerName;
+	const QString TypeLabel = (ItemType == ML_ITEM_MAP) ? "Map" : "Mod";
+	const QString ContentRoot = ItemContentRoot(ItemType, ContainerName, EntryName);
+	const quint64 SizeBytes = ItemDiskSizeBytes(ItemType, ContainerName, EntryName);
+	const QString NotesPath = NotesFilePath(ItemType, ContainerName, EntryName);
+	const QString WorkshopRoot = ActiveWorkshopFolder(ItemType, ContainerName, EntryName);
+	const QString WorkshopJsonPath = QDir::cleanPath(QString("%1/workshop.json").arg(WorkshopRoot));
+	const QString VersionsRoot = WorkshopVersionsRoot(ItemType, ContainerName, EntryName);
+	const QStringList VersionFolders = QDir(VersionsRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+
+	QJsonObject NotesRoot;
+	QFile NotesFile(NotesPath);
+	if (NotesFile.open(QIODevice::ReadOnly))
+		NotesRoot = QJsonDocument::fromJson(NotesFile.readAll()).object();
+
+	QJsonObject WorkshopRootObject;
+	QFile WorkshopFile(WorkshopJsonPath);
+	if (WorkshopFile.open(QIODevice::ReadOnly))
+		WorkshopRootObject = QJsonDocument::fromJson(WorkshopFile.readAll()).object();
+
+	const qint64 PlayCount = StatValue(QString("Stats/ItemsPlayCount/%1").arg(FavoriteKey));
+	const qint64 GameSeconds = StatValue(QString("Stats/ItemsGameSeconds/%1").arg(FavoriteKey));
+	const qint64 LauncherSeconds = StatValue(QString("Stats/Items/%1/LauncherSeconds").arg(FavoriteKey));
+	const qint64 CompileCount = StatValue(QString("Stats/ItemsCompileCount/%1").arg(FavoriteKey));
+	const qint64 CompileSeconds = StatValue(QString("Stats/ItemsCompileSeconds/%1").arg(FavoriteKey));
+	const qint64 LinkCount = StatValue(QString("Stats/ItemsLinkCount/%1").arg(FavoriteKey));
+	const qint64 LinkSeconds = StatValue(QString("Stats/ItemsLinkSeconds/%1").arg(FavoriteKey));
+	const qint64 PublishCount = StatValue(QString("Stats/ItemsPublishCount/%1").arg(FavoriteKey));
+	const QString LastCompileUtc = QSettings().value(QString("Stats/ItemsLastCompileUtc/%1").arg(FavoriteKey)).toString();
+	const QString LastLinkUtc = QSettings().value(QString("Stats/ItemsLastLinkUtc/%1").arg(FavoriteKey)).toString();
+	const QString LastPlayedUtc = QSettings().value(QString("Stats/ItemsLastPlayedUtc/%1").arg(FavoriteKey)).toString();
+
+	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+	Dialog.setWindowTitle(QString("%1 Information").arg(DisplayTextForItem(ItemType, ContainerName, EntryName)));
+	Dialog.resize(760, 680);
+	Dialog.setMinimumSize(700, 620);
+
+	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+	QLabel* HeadingLabel = new QLabel(QString("%1 overview").arg(TypeLabel), &Dialog);
+	QFont HeadingFont = HeadingLabel->font();
+	HeadingFont.setBold(true);
+	HeadingFont.setPointSize(HeadingFont.pointSize() + 3);
+	HeadingLabel->setFont(HeadingFont);
+	Layout->addWidget(HeadingLabel);
+
+	QFrame* TopDivider = new QFrame(&Dialog);
+	TopDivider->setFrameShape(QFrame::HLine);
+	Layout->addWidget(TopDivider);
+
+	QGridLayout* Grid = new QGridLayout();
+	Grid->setColumnStretch(1, 1);
+	int Row = 0;
+	auto AddInfoRow = [&](const QString& Label, const QString& Value)
+	{
+		QLabel* KeyLabel = new QLabel(Label, &Dialog);
+		QFont LabelFont = KeyLabel->font();
+		LabelFont.setBold(true);
+		KeyLabel->setFont(LabelFont);
+		QLabel* ValueLabel = new QLabel(Value.isEmpty() ? "-" : Value, &Dialog);
+		ValueLabel->setWordWrap(true);
+		ValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+		Grid->addWidget(KeyLabel, Row, 0, Qt::AlignTop);
+		Grid->addWidget(ValueLabel, Row, 1, Qt::AlignTop);
+		Row++;
+	};
+	auto FormatUtc = [&](const QString& Value) -> QString
+	{
+		const QDateTime Timestamp = QDateTime::fromString(Value, Qt::ISODate);
+		return Timestamp.isValid() ? Timestamp.toLocalTime().toString("yyyy-MM-dd hh:mm:ss") : QString();
+	};
+
+	AddInfoRow("Name", InternalName);
+	AddInfoRow("Display Name", DisplayName);
+	AddInfoRow("Type", TypeLabel);
+	AddInfoRow("Size", FormatDataSizeBytes(SizeBytes));
+	AddInfoRow("Time Wasted", FormatDuration(LauncherSeconds));
+	AddInfoRow("Plays", QString::number(PlayCount));
+	AddInfoRow("Time In Game", FormatDuration(GameSeconds));
+	AddInfoRow("Compile Time", QString("%1 across %2 build(s)").arg(FormatDuration(CompileSeconds)).arg(CompileCount));
+	AddInfoRow("Link Time", QString("%1 across %2 link(s)").arg(FormatDuration(LinkSeconds)).arg(LinkCount));
+	AddInfoRow("Workshop Publishes", QString::number(PublishCount));
+	AddInfoRow("Workshop Versions", QString::number(VersionFolders.count()));
+	AddInfoRow("Workshop Title", WorkshopRootObject.value("Title").toString());
+	AddInfoRow("Workshop File ID", WorkshopRootObject.value("PublisherID").toString());
+	AddInfoRow("Last Compile", FormatUtc(LastCompileUtc));
+	AddInfoRow("Last Link", FormatUtc(LastLinkUtc));
+	AddInfoRow("Last Played", FormatUtc(LastPlayedUtc));
+	AddInfoRow("Content Folder", QDir::toNativeSeparators(ContentRoot));
+	Layout->addLayout(Grid);
+
+	QFrame* BottomDivider = new QFrame(&Dialog);
+	BottomDivider->setFrameShape(QFrame::HLine);
+	Layout->addWidget(BottomDivider);
+
+	QLabel* NotesLabel = new QLabel("Notes", &Dialog);
+	QFont NotesFont = NotesLabel->font();
+	NotesFont.setBold(true);
+	NotesLabel->setFont(NotesFont);
+	Layout->addWidget(NotesLabel);
+
+	QTextEdit* NotesPreview = new QTextEdit(&Dialog);
+	NotesPreview->setReadOnly(true);
+	NotesPreview->setAcceptRichText(false);
+	const QString InitialNotesText = (QStringList()
+		<< NotesRoot.value("general").toString().trimmed()
+		<< NotesRoot.value("compile").toString().trimmed()
+		<< NotesRoot.value("publish").toString().trimmed()).join("\n\n").trimmed();
+	NotesPreview->setPlainText(InitialNotesText);
+	if (NotesPreview->toPlainText().trimmed().isEmpty())
+		NotesPreview->setPlainText("No notes saved yet.");
+	Layout->addWidget(NotesPreview, 1);
+
+	QDialogButtonBox* ButtonBox = new QDialogButtonBox(QDialogButtonBox::Close, &Dialog);
+	QPushButton* EditNotesButton = ButtonBox->addButton("Edit Notes...", QDialogButtonBox::ActionRole);
+	connect(EditNotesButton, &QPushButton::clicked, this, [=]()
+	{
+		if (!EditNotesForItem(Item))
+			return;
+		QFile RefreshedNotesFile(NotesPath);
+		if (!RefreshedNotesFile.open(QIODevice::ReadOnly))
+			return;
+		const QJsonObject RefreshedNotes = QJsonDocument::fromJson(RefreshedNotesFile.readAll()).object();
+		const QString RefreshedNotesText = (QStringList()
+			<< RefreshedNotes.value("general").toString().trimmed()
+			<< RefreshedNotes.value("compile").toString().trimmed()
+			<< RefreshedNotes.value("publish").toString().trimmed()).join("\n\n").trimmed();
+		NotesPreview->setPlainText(RefreshedNotesText);
+		if (NotesPreview->toPlainText().trimmed().isEmpty())
+			NotesPreview->setPlainText("No notes saved yet.");
+	});
+	connect(ButtonBox, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	Layout->addWidget(ButtonBox);
+
+	Dialog.exec();
 }
 
 bool mlMainWindow::SaveWorkshopVersionSnapshot(int ItemType, const QString& ContainerName, const QString& EntryName, const QString& SourceWorkshopJsonPath, const QString& VersionLabel, const QString& OverridePublisherId)
@@ -2820,7 +5362,7 @@ void mlMainWindow::StartBuildThread(const QList<QPair<QString, QStringList>>& Co
 	mOutputPlainAutoFollow = true;
 	for (const QPair<QString, QStringList>& Command : Commands)
 	{
-		if (IsGameLaunchCommand(Command.first, Command.second) && mRunOnlineWidget && mRunOnlineWidget->isChecked())
+		if (IsGameLaunchCommand(Command.first, Command.second) && ShouldUseSteamOnlineLaunch())
 		{
 			QString TargetLabel = "selected content";
 			const int FsGameIdx = Command.second.indexOf("fs_game");
@@ -2833,9 +5375,19 @@ void mlMainWindow::StartBuildThread(const QList<QPair<QString, QStringList>>& Co
 			break;
 		}
 	}
+	for (const QPair<QString, QStringList>& Command : Commands)
+	{
+		if (IsGameLaunchCommand(Command.first, Command.second))
+		{
+			mPendingLaunchRequestedMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 1;
+			UpdateGameRunningState();
+			break;
+		}
+	}
 
 	mBuildThread = new mlBuildThread(Commands, mIgnoreErrorsWidget->isChecked());
 	connect(mBuildThread, SIGNAL(OutputReady(QString)), this, SLOT(BuildOutputReady(QString)));
+	connect(mBuildThread, &mlBuildThread::CommandFinished, this, &mlMainWindow::OnBuildCommandFinished);
 	connect(mBuildThread, SIGNAL(finished()), this, SLOT(BuildFinished()));
 	mBuildThread->start();
 }
@@ -2886,30 +5438,59 @@ void mlMainWindow::UpdateBuildActionButtons()
 		&& mLinkEnabledWidget && !mLinkEnabledWidget->isChecked();
 	const bool HasCheckedTargets = !CollectTargetItems().isEmpty();
 	QTreeWidgetItem* CurrentItem = mFileListWidget ? mFileListWidget->currentItem() : NULL;
-	const bool HasRunnableSelection = CurrentItem && CurrentItem->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN;
+	const bool HasValidSelection = CurrentItem && CurrentItem->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN;
+	const bool HasRunnableSelection = HasValidSelection
+		&& CurrentItem->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked;
+	const bool HasBuildTarget = HasCheckedTargets || HasValidSelection;
 	const bool HasEnabledAction = (mCompileEnabledWidget && mCompileEnabledWidget->isChecked())
 		|| (mLightEnabledWidget && mLightEnabledWidget->isChecked())
 		|| (mLinkEnabledWidget && mLinkEnabledWidget->isChecked())
 		|| (mRunEnabledWidget && mRunEnabledWidget->isChecked());
-	const bool CanBuild = HasCheckedTargets && HasEnabledAction;
+	const bool CanBuild = HasBuildTarget && HasEnabledAction;
 	const bool CanRunSelectedOnly = RunOnlyMode && HasRunnableSelection;
+	const bool CanAnalyzeCheckedTarget = HasCheckedTargets;
 
 	QString RunOnlyLabel = "Start Game";
+	QString RunOnlyPrimaryLabel = "Start Game";
 	if (HasRunnableSelection)
 	{
 		const int ItemType = CurrentItem->data(0, Qt::UserRole).toInt();
 		RunOnlyLabel = (ItemType == ML_ITEM_MAP) ? "Start Map" : "Start Mod";
+		RunOnlyPrimaryLabel = RunOnlyLabel;
 	}
+	QString BuildLanguageLabel = mBuildLanguage.trimmed().isEmpty() || mBuildLanguage.compare("All", Qt::CaseInsensitive) == 0
+		? QString("English")
+		: mBuildLanguage.trimmed();
+	if (!BuildLanguageLabel.isEmpty())
+		BuildLanguageLabel[0] = BuildLanguageLabel[0].toUpper();
 
-	mBuildButton->setText(RunOnlyMode ? RunOnlyLabel : "Build");
-	mBuildButton->setEnabled(CanBuild || CanRunSelectedOnly);
-	mBuildAllLanguagesButton->setText("Build (English)");
-	mBuildAllLanguagesButton->setEnabled(CanBuild && !RunOnlyMode);
+	mBuildAllLanguagesButton->setText(RunOnlyMode ? RunOnlyPrimaryLabel : QString("Build (%1)").arg(BuildLanguageLabel));
+	mBuildAllLanguagesButton->setEnabled(CanBuild || CanRunSelectedOnly);
+	mBuildButton->setText(RunOnlyMode ? RunOnlyLabel : "Build (All)");
+	mBuildButton->setEnabled(RunOnlyMode ? CanRunSelectedOnly : CanBuild);
+	if (mActionEditBuild)
+		mActionEditBuild->setText(RunOnlyMode ? RunOnlyLabel : "Build (All)");
+	if (mActionEditBuild)
+		mActionEditBuild->setEnabled(CanBuild || CanRunSelectedOnly);
+	if (mActionEditBuildAllLanguages)
+		mActionEditBuildAllLanguages->setText(RunOnlyMode ? RunOnlyPrimaryLabel : QString("Build (%1)").arg(BuildLanguageLabel));
+	if (mActionEditBuildAllLanguages)
+		mActionEditBuildAllLanguages->setEnabled(RunOnlyMode ? CanRunSelectedOnly : CanBuild);
+	if (mActionEditInformation)
+		mActionEditInformation->setEnabled(HasCheckedTargets);
+	if (mAnalyzeItemButton)
+		mAnalyzeItemButton->setEnabled(CanAnalyzeCheckedTarget);
+	if (mActionEditAnalyze)
+		mActionEditAnalyze->setEnabled(CanAnalyzeCheckedTarget);
+	if (mActionEditReadyForPublish)
+		mActionEditReadyForPublish->setEnabled(HasCheckedTargets);
+	if (mActionEditPublish)
+		mActionEditPublish->setEnabled(HasCheckedTargets);
 }
 
 void mlMainWindow::ApplyLauncherLayout()
 {
-	if (!mCentralWidgetSplitter || !mTopWidget || !mTopLayout || !mLeftPanel || !mActionsPanel || !mOutputPanel)
+	if (!mTopWidget || !mTopLayout || !mActionsPanel || !mAssetDockWidget || !mOutputDockWidget)
 		return;
 
 	while (mTopLayout->count() > 0)
@@ -2918,51 +5499,58 @@ void mlMainWindow::ApplyLauncherLayout()
 		delete Item;
 	}
 
-	mTopLayout->addWidget(mLeftPanel);
+	mTopLayout->addStretch(1);
 	mTopLayout->addWidget(mActionsPanel);
-	mTopLayout->setStretch(0, 1);
-	mTopLayout->setStretch(1, 0);
-
-	while (mCentralWidgetSplitter->count() > 0)
-	{
-		QWidget* Widget = mCentralWidgetSplitter->widget(0);
-		if (!Widget)
-			break;
-		Widget->hide();
-		Widget->setParent(NULL);
-	}
+	mTopLayout->addStretch(1);
+	mTopWidget->show();
+	mActionsPanel->show();
+	mAssetDockWidget->setFloating(false);
+	mOutputDockWidget->setFloating(false);
+	removeDockWidget(mAssetDockWidget);
+	removeDockWidget(mOutputDockWidget);
+	addDockWidget(Qt::LeftDockWidgetArea, mAssetDockWidget);
+	mAssetDockWidget->show();
+	mOutputDockWidget->show();
 
 	const QString LayoutKey = mLauncherLayout.trimmed().toLower();
 	if (LayoutKey == "left-build-console")
 	{
-		mCentralWidgetSplitter->setOrientation(Qt::Horizontal);
-		mCentralWidgetSplitter->addWidget(mLeftPanel);
-		mCentralWidgetSplitter->addWidget(mActionsPanel);
-		mCentralWidgetSplitter->addWidget(mOutputPanel);
-		mCentralWidgetSplitter->setSizes(QList<int>() << 430 << 240 << 520);
-		mTopWidget->hide();
+		addDockWidget(Qt::RightDockWidgetArea, mOutputDockWidget);
+		resizeDocks(QList<QDockWidget*>() << mAssetDockWidget << mOutputDockWidget, QList<int>() << 430 << 520, Qt::Horizontal);
 	}
 	else if (LayoutKey == "left-console-build")
 	{
-		mCentralWidgetSplitter->setOrientation(Qt::Horizontal);
-		mCentralWidgetSplitter->addWidget(mLeftPanel);
-		mCentralWidgetSplitter->addWidget(mOutputPanel);
-		mCentralWidgetSplitter->addWidget(mActionsPanel);
-		mCentralWidgetSplitter->setSizes(QList<int>() << 430 << 520 << 240);
-		mTopWidget->hide();
+		addDockWidget(Qt::LeftDockWidgetArea, mOutputDockWidget);
+		splitDockWidget(mAssetDockWidget, mOutputDockWidget, Qt::Horizontal);
+		resizeDocks(QList<QDockWidget*>() << mAssetDockWidget << mOutputDockWidget, QList<int>() << 430 << 520, Qt::Horizontal);
 	}
 	else
 	{
-		mCentralWidgetSplitter->setOrientation(Qt::Vertical);
-		mCentralWidgetSplitter->addWidget(mTopWidget);
-		mCentralWidgetSplitter->addWidget(mOutputPanel);
-		mCentralWidgetSplitter->setSizes(QList<int>() << 290 << 450);
-		mTopWidget->show();
+		addDockWidget(Qt::BottomDockWidgetArea, mOutputDockWidget);
+		resizeDocks(QList<QDockWidget*>() << mAssetDockWidget, QList<int>() << 430, Qt::Horizontal);
+		resizeDocks(QList<QDockWidget*>() << mOutputDockWidget, QList<int>() << 360, Qt::Vertical);
+	}
+	mAssetDockWidget->raise();
+	mOutputDockWidget->raise();
+}
+
+QTreeWidgetItem* mlMainWindow::ActiveFileItem() const
+{
+	if (!mFileListWidget)
+		return NULL;
+
+	QTreeWidgetItem* Item = mFileListWidget->currentItem();
+	if (!Item)
+	{
+		const QList<QTreeWidgetItem*> SelectedItems = mFileListWidget->selectedItems();
+		if (!SelectedItems.isEmpty())
+			Item = SelectedItems[0];
 	}
 
-	mLeftPanel->show();
-	mActionsPanel->show();
-	mOutputPanel->show();
+	if (!Item || Item->data(0, Qt::UserRole).toInt() == ML_ITEM_UNKNOWN)
+		return NULL;
+
+	return Item;
 }
 
 QString mlMainWindow::GetItemContainerName(QTreeWidgetItem* Item) const
@@ -3148,6 +5736,658 @@ void mlMainWindow::UpdateParentCheckState(QTreeWidgetItem* Item)
 	}
 }
 
+void mlMainWindow::RefreshRunDvars()
+{
+	mRunDvars.clear();
+	for (int DvarIdx = 0; DvarIdx < ARRAYSIZE(gDvars); DvarIdx++)
+	{
+		const dvar_s DvarEntry = gDvars[DvarIdx];
+		const QString DvarValue = Dvar::launchValue(DvarEntry);
+		if (DvarValue.isEmpty())
+			continue;
+
+		if (!DvarEntry.isCmd)
+			mRunDvars << "+set" << DvarEntry.name;
+		else
+			mRunDvars << QString("+%1").arg(DvarEntry.name);
+		mRunDvars << DvarValue;
+	}
+}
+
+bool mlMainWindow::IsNewerLauncherVersion(const QString& AvailableVersion) const
+{
+	const QVersionNumber CurrentVersion = VersionNumberFromText(QString::fromLatin1(kLauncherVersion));
+	const QVersionNumber LatestVersion = VersionNumberFromText(AvailableVersion);
+	return !LatestVersion.isNull() && QVersionNumber::compare(LatestVersion, CurrentVersion) > 0;
+}
+
+QString mlMainWindow::UpdateApiUrl() const
+{
+	return QString::fromLatin1(kLauncherReleaseApiUrl).trimmed();
+}
+
+QString mlMainWindow::UpdateReleasesPageUrl() const
+{
+	return QString::fromLatin1(kLauncherReleasesUrl).trimmed();
+}
+
+QJsonObject mlMainWindow::SelectPrimaryReleaseAsset(const QJsonArray& Assets) const
+{
+	QJsonObject FallbackAsset;
+	for (const QJsonValue& AssetValue : Assets)
+	{
+		const QJsonObject Asset = AssetValue.toObject();
+		const QString AssetName = Asset.value("name").toString().trimmed();
+		const QString AssetUrl = Asset.value("browser_download_url").toString().trimmed();
+		if (AssetName.isEmpty() || AssetUrl.isEmpty())
+			continue;
+
+		const QString LowerName = AssetName.toLower();
+		if (!LowerName.endsWith(".zip"))
+			continue;
+
+		if (FallbackAsset.isEmpty())
+			FallbackAsset = Asset;
+
+		if (!LowerName.contains("original"))
+			return Asset;
+	}
+	return FallbackAsset;
+}
+
+void mlMainWindow::CheckForUpdates(bool UserInitiated)
+{
+	if (!mUpdateNetworkAccess)
+		return;
+
+	if (mUpdateMetadataReply || mUpdateDownloadReply)
+	{
+		SetFooterUpdateState("Update status: request already in progress");
+		if (UserInitiated)
+			QMessageBox::information(this, "Check for Updates", "An update request is already in progress.");
+		return;
+	}
+
+	const QString ApiUrl = UpdateApiUrl();
+	if (ApiUrl.isEmpty())
+	{
+		SetFooterUpdateState("Update status: no API URL configured");
+		if (UserInitiated)
+			QMessageBox::information(this, "Check for Updates", "No update API URL is configured yet.");
+		return;
+	}
+
+	QSettings Settings;
+	Settings.setValue("UpdateCheck/LastCheckedUtc", QDateTime::currentDateTimeUtc());
+	SetFooterUpdateState("Checking for Update");
+
+	QNetworkRequest Request{ QUrl(ApiUrl) };
+	Request.setHeader(QNetworkRequest::UserAgentHeader, QString("BO3-ModLauncher/%1").arg(kLauncherVersion));
+	Request.setRawHeader("Accept", "application/vnd.github+json");
+
+	QProgressDialog* ProgressDialog = NULL;
+	if (UserInitiated)
+	{
+		ProgressDialog = new QProgressDialog("Checking for launcher updates...", QString(), 0, 0, this);
+		ProgressDialog->setWindowTitle("Check for Updates");
+		ProgressDialog->setWindowModality(Qt::WindowModal);
+		ProgressDialog->setCancelButton(NULL);
+		ProgressDialog->setMinimumDuration(0);
+		ProgressDialog->show();
+	}
+
+	mUpdateMetadataReply = mUpdateNetworkAccess->get(Request);
+	connect(mUpdateMetadataReply, &QNetworkReply::finished, this, [=]()
+	{
+		if (ProgressDialog)
+			ProgressDialog->deleteLater();
+
+		QPointer<QNetworkReply> Reply = mUpdateMetadataReply;
+		mUpdateMetadataReply = NULL;
+		if (!Reply)
+			return;
+
+		const QByteArray ResponseBytes = Reply->readAll();
+		const QNetworkReply::NetworkError Error = Reply->error();
+		const QString ErrorText = Reply->errorString();
+		Reply->deleteLater();
+
+			if (Error != QNetworkReply::NoError)
+			{
+				SetFooterUpdateState(QString("Update check failed: %1").arg(ErrorText));
+				if (UserInitiated)
+					QMessageBox::warning(this, "Check for Updates", QString("Unable to check for updates.\n\n%1").arg(ErrorText));
+				return;
+			}
+
+		QJsonParseError ParseError;
+		const QJsonDocument Document = QJsonDocument::fromJson(ResponseBytes, &ParseError);
+			if (ParseError.error != QJsonParseError::NoError || !Document.isObject())
+			{
+				SetFooterUpdateState("Update check failed: invalid JSON");
+				if (UserInitiated)
+					QMessageBox::warning(this, "Check for Updates", "Update response was not valid JSON.");
+				return;
+			}
+
+		HandleUpdateMetadata(Document.object(), UserInitiated);
+	});
+}
+
+void mlMainWindow::HandleUpdateMetadata(const QJsonObject& Root, bool UserInitiated)
+{
+	const QString LatestVersion = CleanVersionText(Root.value("tag_name").toString().trimmed().isEmpty()
+		? Root.value("name").toString().trimmed()
+		: Root.value("tag_name").toString().trimmed());
+
+	if (LatestVersion.isEmpty())
+	{
+		SetFooterUpdateState("Update check failed: version tag missing");
+		if (UserInitiated)
+			QMessageBox::warning(this, "Check for Updates", "Release metadata did not contain a version tag.");
+		return;
+	}
+
+	if (!IsNewerLauncherVersion(LatestVersion))
+	{
+		SetFooterUpdateState("Up to date");
+		if (UserInitiated)
+			QMessageBox::information(this, "Check for Updates",
+				QString("You already have the latest launcher version.\n\nCurrent version: %1").arg(kLauncherVersion));
+		return;
+	}
+
+	const QJsonObject Asset = SelectPrimaryReleaseAsset(Root.value("assets").toArray());
+	const QString DownloadUrl = Asset.value("browser_download_url").toString().trimmed();
+	const QString ReleasePageUrl = Root.value("html_url").toString().trimmed().isEmpty() ? UpdateReleasesPageUrl() : Root.value("html_url").toString().trimmed();
+	SetFooterUpdateState(QString("New Version available (v%1)").arg(LatestVersion), DownloadUrl, LatestVersion, ReleasePageUrl, true);
+	if (statusBar())
+		statusBar()->showMessage(QString("Launcher update available: %1").arg(LatestVersion), 10000);
+
+	QSettings Settings;
+	if (!UserInitiated && Settings.value("UpdateCheck/DismissedVersion").toString() == LatestVersion)
+		return;
+
+	const QString ReleaseBody = Root.value("body").toString().trimmed();
+	QString PromptText = QString("A new launcher version is available.\n\nCurrent version: %1\nLatest version: %2")
+		.arg(kLauncherVersion, LatestVersion);
+	if (!ReleaseBody.isEmpty())
+	{
+		QString Summary = ReleaseBody;
+		if (Summary.count() > 600)
+			Summary = Summary.left(600).trimmed() + "...";
+		PromptText += QString("\n\nRelease notes:\n%1").arg(Summary);
+	}
+	PromptText += "\n\nDownload and install it now?";
+
+	QMessageBox Prompt(this);
+	Prompt.setIcon(QMessageBox::Information);
+	Prompt.setWindowTitle("Launcher Update Available");
+	Prompt.setText(PromptText);
+	QPushButton* InstallNowButton = Prompt.addButton("Download && Install", QMessageBox::AcceptRole);
+	QPushButton* OpenReleasesButton = NULL;
+	if (!ReleasePageUrl.isEmpty())
+		OpenReleasesButton = Prompt.addButton("Open Releases Page", QMessageBox::ActionRole);
+	QPushButton* LaterButton = Prompt.addButton("Later", QMessageBox::RejectRole);
+	Prompt.exec();
+
+	if (Prompt.clickedButton() == InstallNowButton)
+	{
+		if (DownloadUrl.isEmpty())
+		{
+			QMessageBox::warning(this, "Launcher Update", "No downloadable ZIP asset was found for this release.");
+			return;
+		}
+		Settings.remove("UpdateCheck/DismissedVersion");
+		StartUpdateDownload(QUrl(DownloadUrl), LatestVersion);
+		return;
+	}
+
+	if (Prompt.clickedButton() == OpenReleasesButton)
+	{
+		QDesktopServices::openUrl(QUrl(ReleasePageUrl));
+		return;
+	}
+
+	if (Prompt.clickedButton() == LaterButton && !UserInitiated)
+		Settings.setValue("UpdateCheck/DismissedVersion", LatestVersion);
+}
+
+void mlMainWindow::StartUpdateDownload(const QUrl& DownloadUrl, const QString& VersionLabel)
+{
+	if (!DownloadUrl.isValid())
+	{
+		SetFooterUpdateState("Update download failed: invalid URL");
+		QMessageBox::warning(this, "Launcher Update", "The release download URL is invalid.");
+		return;
+	}
+
+	if (mUpdateDownloadReply)
+		return;
+
+	SetFooterUpdateState(QString("Downloading %1...").arg(VersionLabel), DownloadUrl.toString(), VersionLabel, mAvailableReleasePageUrl, true);
+
+	const QString TempFolder = QDir::cleanPath(QString("%1/bo3_modlauncher_update_%2")
+		.arg(QDir::tempPath(), QDateTime::currentDateTimeUtc().toString("yyyyMMdd_hhmmsszzz")));
+	QDir().mkpath(TempFolder);
+
+	mPendingUpdateVersion = VersionLabel;
+	mUpdateDownloadPath = QDir::cleanPath(QString("%1/BO3_ModLauncher_%2.zip").arg(TempFolder, VersionLabel));
+	if (mUpdateDownloadFile)
+	{
+		delete mUpdateDownloadFile;
+		mUpdateDownloadFile = NULL;
+	}
+	mUpdateDownloadFile = new QFile(mUpdateDownloadPath, this);
+	if (!mUpdateDownloadFile->open(QIODevice::WriteOnly))
+	{
+		QMessageBox::warning(this, "Launcher Update", QString("Unable to create the update file:\n%1").arg(mUpdateDownloadPath));
+		delete mUpdateDownloadFile;
+		mUpdateDownloadFile = NULL;
+		return;
+	}
+
+	QNetworkRequest Request{ DownloadUrl };
+	Request.setHeader(QNetworkRequest::UserAgentHeader, QString("BO3-ModLauncher/%1").arg(kLauncherVersion));
+	Request.setRawHeader("Accept", "application/octet-stream");
+	mUpdateDownloadReply = mUpdateNetworkAccess->get(Request);
+
+	mUpdateProgressDialog = new QProgressDialog(QString("Downloading launcher update %1...").arg(VersionLabel), "Cancel", 0, 100, this);
+	mUpdateProgressDialog->setWindowTitle("Downloading Update");
+	mUpdateProgressDialog->setWindowModality(Qt::WindowModal);
+	mUpdateProgressDialog->setMinimumDuration(0);
+	mUpdateProgressDialog->setValue(0);
+	connect(mUpdateProgressDialog, &QProgressDialog::canceled, this, [this]()
+	{
+		if (mUpdateDownloadReply)
+			mUpdateDownloadReply->abort();
+	});
+
+	connect(mUpdateDownloadReply, &QNetworkReply::readyRead, this, [this]()
+	{
+		if (mUpdateDownloadReply && mUpdateDownloadFile)
+			mUpdateDownloadFile->write(mUpdateDownloadReply->readAll());
+	});
+	connect(mUpdateDownloadReply, &QNetworkReply::downloadProgress, this, [this](qint64 Received, qint64 Total)
+	{
+		if (!mUpdateProgressDialog)
+			return;
+
+		if (Total > 0)
+		{
+			mUpdateProgressDialog->setMaximum(100);
+			mUpdateProgressDialog->setValue(qBound(0, static_cast<int>((Received * 100) / Total), 100));
+			mUpdateProgressDialog->setLabelText(QString("Downloading launcher update %1...\n%2 / %3 MB")
+				.arg(mPendingUpdateVersion)
+				.arg(QString::number(Received / 1024.0 / 1024.0, 'f', 2))
+				.arg(QString::number(Total / 1024.0 / 1024.0, 'f', 2)));
+		}
+		else
+		{
+			mUpdateProgressDialog->setMaximum(0);
+			mUpdateProgressDialog->setLabelText(QString("Downloading launcher update %1...").arg(mPendingUpdateVersion));
+		}
+	});
+	connect(mUpdateDownloadReply, &QNetworkReply::finished, this, [this]()
+	{
+		if (mUpdateDownloadReply && mUpdateDownloadFile)
+			mUpdateDownloadFile->write(mUpdateDownloadReply->readAll());
+
+		if (mUpdateDownloadFile)
+		{
+			mUpdateDownloadFile->flush();
+			mUpdateDownloadFile->close();
+			delete mUpdateDownloadFile;
+			mUpdateDownloadFile = NULL;
+		}
+
+		if (mUpdateProgressDialog)
+		{
+			mUpdateProgressDialog->hide();
+			mUpdateProgressDialog->deleteLater();
+			mUpdateProgressDialog = NULL;
+		}
+
+		QPointer<QNetworkReply> Reply = mUpdateDownloadReply;
+		mUpdateDownloadReply = NULL;
+		if (!Reply)
+			return;
+
+		const QNetworkReply::NetworkError Error = Reply->error();
+		const QString ErrorText = Reply->errorString();
+		Reply->deleteLater();
+
+			if (Error != QNetworkReply::NoError)
+			{
+				QFile::remove(mUpdateDownloadPath);
+				SetFooterUpdateState(QString("Update download failed: %1").arg(ErrorText));
+				QMessageBox::warning(this, "Launcher Update", QString("The update download failed.\n\n%1").arg(ErrorText));
+				return;
+			}
+
+			if (!LaunchUpdateInstaller(mUpdateDownloadPath, mPendingUpdateVersion))
+			{
+				QFile::remove(mUpdateDownloadPath);
+				SetFooterUpdateState(QString("Update ready: %1").arg(mPendingUpdateVersion), mAvailableUpdateUrl, mPendingUpdateVersion, mAvailableReleasePageUrl, true);
+				return;
+			}
+
+			SetFooterUpdateState(QString("Installing update %1...").arg(mPendingUpdateVersion), mAvailableUpdateUrl, mPendingUpdateVersion, mAvailableReleasePageUrl, true);
+			QMessageBox::information(this, "Launcher Update",
+			QString("Launcher update %1 downloaded successfully.\n\nThe launcher will now close so the update can be installed.")
+				.arg(mPendingUpdateVersion));
+		close();
+	});
+}
+
+bool mlMainWindow::LaunchUpdateInstaller(const QString& ZipPath, const QString& VersionLabel)
+{
+	Q_UNUSED(VersionLabel);
+
+	const QString UpdateFolder = QFileInfo(ZipPath).absolutePath();
+	const QString ExtractRoot = QDir::cleanPath(QString("%1/extracted").arg(UpdateFolder));
+	QDir().mkpath(UpdateFolder);
+	QDir(ExtractRoot).removeRecursively();
+	QDir().mkpath(ExtractRoot);
+
+	QProcess ExtractProcess;
+	const QString EscapedZipPath = QDir::toNativeSeparators(ZipPath).replace("'", "''");
+	const QString EscapedExtractRoot = QDir::toNativeSeparators(ExtractRoot).replace("'", "''");
+	QStringList ExtractArgs;
+	ExtractArgs
+		<< "-NoProfile"
+		<< "-ExecutionPolicy" << "Bypass"
+		<< "-Command" << QString("Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force")
+			.arg(EscapedZipPath, EscapedExtractRoot);
+	ExtractProcess.start("powershell.exe", ExtractArgs);
+	if (!ExtractProcess.waitForStarted(10000) || !ExtractProcess.waitForFinished(-1) || ExtractProcess.exitCode() != 0)
+	{
+		const QString PsError = QString::fromLocal8Bit(ExtractProcess.readAllStandardError());
+		QMessageBox::warning(this, "Launcher Update",
+			QString("Unable to prepare downloaded update files.\n\n%1").arg(PsError.trimmed().isEmpty() ? "Expand-Archive failed." : PsError.trimmed()));
+		return false;
+	}
+
+	const QString RuntimeDir = QFileInfo(QCoreApplication::applicationFilePath()).absolutePath();
+	QString InstalledUpdaterPath = QDir::cleanPath(QString("%1/LauncherUpdater.exe").arg(RuntimeDir));
+	if (!QFileInfo::exists(InstalledUpdaterPath))
+		InstalledUpdaterPath = QDir::cleanPath(QString("%1/modtools/ModLauncherCustomRuntime/LauncherUpdater.exe").arg(mGamePath));
+
+	if (!QFileInfo::exists(InstalledUpdaterPath))
+	{
+		QMessageBox::warning(this, "Launcher Update",
+			QString("LauncherUpdater.exe was not found.\nExpected at:\n%1").arg(QDir::toNativeSeparators(InstalledUpdaterPath)));
+		return false;
+	}
+
+	const QString RunnerPath = QDir::cleanPath(QString("%1/LauncherUpdater_runner_%2_%3.exe")
+		.arg(QDir::tempPath())
+		.arg(QCoreApplication::applicationPid())
+		.arg(QDateTime::currentDateTimeUtc().toString("yyyyMMddhhmmsszzz")));
+	QFile::remove(RunnerPath);
+	if (!QFile::copy(InstalledUpdaterPath, RunnerPath))
+	{
+		QMessageBox::warning(this, "Launcher Update",
+			QString("Unable to prepare updater runner:\n%1").arg(QDir::toNativeSeparators(RunnerPath)));
+		return false;
+	}
+
+	const QString RestartPath = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+	const QStringList UpdaterArgs = QStringList()
+		<< "--pid" << QString::number(QCoreApplication::applicationPid())
+		<< "--install-dir" << QDir::toNativeSeparators(mGamePath)
+		<< "--update-dir" << QDir::toNativeSeparators(UpdateFolder)
+		<< "--restart" << RestartPath;
+
+	if (!QProcess::startDetached(QDir::toNativeSeparators(RunnerPath), UpdaterArgs, QDir::toNativeSeparators(UpdateFolder)))
+	{
+		QMessageBox::warning(this, "Launcher Update", "Could not launch LauncherUpdater.exe.");
+		return false;
+	}
+
+	return true;
+}
+
+void mlMainWindow::SetFooterUpdateState(const QString& Message, const QString& DownloadUrl, const QString& VersionLabel, const QString& ReleasePageUrl, bool UpdateAvailable)
+{
+	mAvailableUpdateUrl = DownloadUrl.trimmed();
+	mAvailableUpdateVersion = VersionLabel.trimmed();
+	mAvailableReleasePageUrl = ReleasePageUrl.trimmed();
+
+	if (mFooterUpdateStatusLabel)
+	{
+		const QString FooterStateText = Message.trimmed().isEmpty() ? "Up to date" : Message.trimmed();
+		mFooterUpdateStatusLabel->setText(QString("v%1 - %2").arg(kLauncherVersion, FooterStateText));
+		mFooterUpdateStatusLabel->setStyleSheet(UpdateAvailable ? "color: #63d471; padding: 4px 8px; font-weight: 700;" : QString());
+	}
+
+	if (mFooterDownloadButton)
+	{
+		const bool CanDownload = !mAvailableUpdateVersion.isEmpty() && (!mAvailableUpdateUrl.isEmpty() || !mAvailableReleasePageUrl.isEmpty());
+		const bool ShowDownloadButton = UpdateAvailable && CanDownload;
+		mFooterDownloadButton->setVisible(ShowDownloadButton);
+		if (CanDownload)
+			mFooterDownloadButton->setText("Download");
+	}
+
+	if (mFooterRefreshButton)
+	{
+		const bool CanDownload = !mAvailableUpdateVersion.isEmpty() && (!mAvailableUpdateUrl.isEmpty() || !mAvailableReleasePageUrl.isEmpty());
+		mFooterRefreshButton->setVisible(!(UpdateAvailable && CanDownload));
+	}
+}
+
+void mlMainWindow::RecordUserActivity()
+{
+	if (!mStatsElapsedTimer.isValid())
+		return;
+
+	mLastActivityMs = mStatsElapsedTimer.elapsed();
+}
+
+void mlMainWindow::UpdateStatsTimers()
+{
+	if (!mStatsElapsedTimer.isValid())
+		return;
+
+	const qint64 NowMs = mStatsElapsedTimer.elapsed();
+	if (NowMs <= mLastStatsTickMs)
+		return;
+
+	const qint64 DeltaSeconds = (NowMs - mLastStatsTickMs) / 1000;
+	if (DeltaSeconds <= 0)
+		return;
+
+	AddStatSeconds("Stats/TotalOpenSeconds", DeltaSeconds);
+	const qint64 IdleThresholdMs = 60000;
+	const bool IsIdle = (NowMs - mLastActivityMs) >= IdleThresholdMs;
+	AddStatSeconds(IsIdle ? "Stats/TotalIdleSeconds" : "Stats/TotalActiveSeconds", DeltaSeconds);
+	mLastStatsTickMs += DeltaSeconds * 1000;
+}
+
+void mlMainWindow::FlushCurrentItemTime()
+{
+	if (!mStatsElapsedTimer.isValid() || mCurrentStatsItemKey.isEmpty() || mCurrentItemStartedMs <= 0)
+		return;
+
+	const qint64 DurationSeconds = qMax<qint64>(0, (mStatsElapsedTimer.elapsed() - mCurrentItemStartedMs) / 1000);
+	if (DurationSeconds > 0)
+		AddStatSeconds(QString("Stats/Items/%1/LauncherSeconds").arg(mCurrentStatsItemKey), DurationSeconds);
+
+	mCurrentItemStartedMs = mStatsElapsedTimer.elapsed();
+}
+
+void mlMainWindow::SetCurrentStatsItem(QTreeWidgetItem* Item)
+{
+	if (!mStatsElapsedTimer.isValid())
+		return;
+
+	UpdateStatsTimers();
+	FlushCurrentItemTime();
+	mCurrentStatsItemKey.clear();
+	if (Item && Item->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN)
+		mCurrentStatsItemKey = NormalizeStatsItemKey(GetItemFavoriteKey(Item));
+	mCurrentItemStartedMs = mStatsElapsedTimer.elapsed();
+}
+
+QString mlMainWindow::NormalizeStatsItemKey(const QString& FavoriteKey) const
+{
+	const QString Key = FavoriteKey.trimmed().toLower();
+	if (Key.startsWith("mod:"))
+	{
+		const int SlashIndex = Key.indexOf('/');
+		if (SlashIndex > 0)
+			return Key.left(SlashIndex);
+	}
+
+	return Key;
+}
+
+void mlMainWindow::AddStatSeconds(const QString& Key, qint64 Seconds)
+{
+	if (Seconds <= 0)
+		return;
+
+	QSettings Settings;
+	Settings.setValue(Key, Settings.value(Key, 0).toLongLong() + Seconds);
+}
+
+void mlMainWindow::IncrementStat(const QString& Key, qint64 Amount)
+{
+	if (Amount == 0)
+		return;
+
+	QSettings Settings;
+	Settings.setValue(Key, Settings.value(Key, 0).toLongLong() + Amount);
+}
+
+qint64 mlMainWindow::StatValue(const QString& Key) const
+{
+	QSettings Settings;
+	return Settings.value(Key, 0).toLongLong();
+}
+
+QString mlMainWindow::FormatDuration(qint64 Seconds) const
+{
+	Seconds = qMax<qint64>(0, Seconds);
+	const qint64 Hours = Seconds / 3600;
+	const qint64 Minutes = (Seconds % 3600) / 60;
+	const qint64 RemainingSeconds = Seconds % 60;
+	if (Hours > 0)
+		return QString("%1h %2m %3s").arg(Hours).arg(Minutes).arg(RemainingSeconds);
+	if (Minutes > 0)
+		return QString("%1m %2s").arg(Minutes).arg(RemainingSeconds);
+	return QString("%1s").arg(RemainingSeconds);
+}
+
+QString mlMainWindow::DisplayNameForStatsKey(const QString& FavoriteKey) const
+{
+	const QString DisplayName = DisplayNameForEntry(FavoriteKey);
+	if (!DisplayName.isEmpty())
+		return DisplayName;
+
+	if (FavoriteKey.startsWith("map:"))
+		return FavoriteKey.mid(4);
+	if (FavoriteKey.startsWith("mod:"))
+		return FavoriteKey.mid(4);
+	return FavoriteKey;
+}
+
+void mlMainWindow::TrackProcessLifetime(QProcess* Process, const QString& CountKey, const QString& SecondsKey, const QString& PerItemSecondsPrefix, const QString& ItemKey)
+{
+	if (!Process)
+		return;
+
+	IncrementStat(CountKey);
+	QElapsedTimer* Timer = new QElapsedTimer();
+	Timer->start();
+	connect(Process, SIGNAL(finished(int)), Process, SLOT(deleteLater()));
+	connect(Process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [=](int, QProcess::ExitStatus)
+	{
+		const qint64 DurationSeconds = qMax<qint64>(0, Timer->elapsed() / 1000);
+		delete Timer;
+		AddStatSeconds(SecondsKey, DurationSeconds);
+		if (!PerItemSecondsPrefix.isEmpty() && !ItemKey.isEmpty())
+			AddStatSeconds(QString("%1/%2").arg(PerItemSecondsPrefix, ItemKey.toLower()), DurationSeconds);
+	});
+}
+
+void mlMainWindow::OnBuildCommandFinished(const QString& Program, const QStringList& Arguments, qint64 DurationMs, int ExitCode)
+{
+	if (ExitCode != 0)
+		return;
+
+	const QString ProgramLower = QFileInfo(Program).fileName().toLower();
+	const qint64 DurationSeconds = qMax<qint64>(0, DurationMs / 1000);
+	auto ArgumentValue = [&](const QString& SwitchName) -> QString
+	{
+		const int Index = Arguments.indexOf(SwitchName);
+		if (Index >= 0 && Index + 1 < Arguments.count())
+			return Arguments[Index + 1];
+		return QString();
+	};
+	auto MapKeyFromArguments = [&]() -> QString
+	{
+		QString MapPath = ArgumentValue("-loadFrom");
+		if (MapPath.isEmpty())
+		{
+			for (const QString& Argument : Arguments)
+			{
+				if (Argument.endsWith(".map", Qt::CaseInsensitive))
+				{
+					MapPath = Argument;
+					break;
+				}
+			}
+		}
+		if (MapPath.isEmpty())
+			return QString();
+		return NormalizeStatsItemKey(QString("map:%1").arg(QFileInfo(MapPath).completeBaseName().toLower()));
+	};
+	auto LinkKeyFromArguments = [&]() -> QString
+	{
+		const QString ModSource = ArgumentValue("-modsource").trimmed().toLower();
+		const QString FsGame = ArgumentValue("-fs_game").trimmed().toLower();
+		if (!FsGame.isEmpty())
+			return NormalizeStatsItemKey(QString("mod:%1/%2").arg(FsGame, ModSource));
+		if (!ModSource.isEmpty())
+			return NormalizeStatsItemKey(QString("map:%1").arg(ModSource));
+		return QString();
+	};
+	auto StorePerItemBuildStat = [&](const QString& ItemKey, const QString& CountPrefix, const QString& SecondsPrefix, const QString& LastUtcPrefix)
+	{
+		if (ItemKey.isEmpty())
+			return;
+		IncrementStat(QString("%1/%2").arg(CountPrefix, ItemKey));
+		AddStatSeconds(QString("%1/%2").arg(SecondsPrefix, ItemKey), DurationSeconds);
+		QSettings().setValue(QString("%1/%2").arg(LastUtcPrefix, ItemKey), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+	};
+	if (ProgramLower == "compiler_modtools.exe" || ProgramLower == "cod2map64.exe")
+	{
+		IncrementStat("Stats/TotalCompiles");
+		AddStatSeconds("Stats/TotalCompileSeconds", DurationSeconds);
+		StorePerItemBuildStat(MapKeyFromArguments(), "Stats/ItemsCompileCount", "Stats/ItemsCompileSeconds", "Stats/ItemsLastCompileUtc");
+	}
+	else if (ProgramLower == "linker_modtools.exe")
+	{
+		IncrementStat("Stats/TotalLinks");
+		AddStatSeconds("Stats/TotalLinkSeconds", DurationSeconds);
+		StorePerItemBuildStat(LinkKeyFromArguments(), "Stats/ItemsLinkCount", "Stats/ItemsLinkSeconds", "Stats/ItemsLastLinkUtc");
+	}
+	else if (ProgramLower == "light.exe" || ProgramLower == "radiant_modtools.exe")
+	{
+		IncrementStat("Stats/TotalLights");
+		AddStatSeconds("Stats/TotalLightSeconds", DurationSeconds);
+	}
+	else if (IsGameLaunchCommand(Program, Arguments))
+		IncrementStat("Stats/TotalLauncherRuns");
+}
+
+void mlMainWindow::StatsTick()
+{
+	UpdateStatsTimers();
+}
+
 QString mlMainWindow::ResolveSteamExecutablePath() const
 {
 	QSettings SteamUser(QString("HKEY_CURRENT_USER\\Software\\Valve\\Steam"), QSettings::NativeFormat);
@@ -3188,15 +6428,32 @@ QPair<QString, QStringList> mlMainWindow::CreateGameLaunchCommand(const QString&
 	QStringList Args;
 	if (!mRunDvars.isEmpty())
 		Args << mRunDvars;
-	Args << "+set" << "fs_game" << FsGame;
+	if (!FsGame.isEmpty())
+		Args << "+set" << "fs_game" << FsGame;
 	if (!MapName.isEmpty())
 		Args << "+devmap" << MapName;
+	if (mQuickLaunchWidget && mQuickLaunchWidget->IsWorkshopSelection())
+	{
+		const QString WorkshopId = mQuickLaunchWidget->currentWorkshopId().trimmed();
+		if (Args.contains("+set") && Args.contains("fs_game"))
+		{
+			const int FsGameIdx = Args.indexOf("fs_game");
+			if (FsGameIdx >= 1)
+			{
+				Args.removeAt(FsGameIdx - 1);
+				Args.removeAt(FsGameIdx - 1);
+			}
+		}
+		Args << "+set" << "fs_game" << "mod";
+		if (!WorkshopId.isEmpty())
+			Args << "+set" << "workshopid" << WorkshopId;
+	}
 
 	const QString ExtraOptions = mRunOptionsWidget ? mRunOptionsWidget->text() : QString();
 	if (!ExtraOptions.isEmpty())
 		Args << ExtraOptions.split(' ', Qt::SkipEmptyParts);
 
-	if (mRunOnlineWidget && mRunOnlineWidget->isChecked())
+	if (ShouldUseSteamOnlineLaunch())
 		return qMakePair(ResolveSteamExecutablePath(), QStringList() << "-applaunch" << QString::number(AppId) << Args);
 
 	return qMakePair(QString("%1/BlackOps3.exe").arg(mGamePath), Args);
@@ -3401,16 +6658,12 @@ bool mlMainWindow::MapMatchesCurrentTab(const QString& MapName) const
 {
 	if (!mCategoryTabs)
 		return true;
-
-	switch (mCategoryTabs->currentIndex())
-	{
-	case CategoryZMMaps:
+	const QString ActiveTabKey = CurrentCategoryTabKey(mCategoryTabs);
+	if (ActiveTabKey == "zm-maps")
 		return MapName.startsWith("zm_", Qt::CaseInsensitive);
-	case CategoryMPMaps:
+	if (ActiveTabKey == "mp-maps")
 		return MapName.startsWith("mp_", Qt::CaseInsensitive);
-	default:
-		return true;
-	}
+	return true;
 }
 
 QString mlMainWindow::DisplayTextForItem(int ItemType, const QString& ContainerName, const QString& EntryName) const
@@ -3478,12 +6731,19 @@ QWidget* mlMainWindow::CreateItemTitleWidget(QTreeWidgetItem* Item, int ItemType
 	NameButton->setFlat(true);
 	NameButton->setCursor(Qt::PointingHandCursor);
 	NameButton->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
-	NameButton->setText(SupportsDisplayName(ItemType) ? DisplayNameForEntry(FavoriteKey) : QString());
+	const QString CustomDisplayName = SupportsDisplayName(ItemType) ? DisplayNameForEntry(FavoriteKey) : QString();
+	const bool HasCustomDisplayName = !CustomDisplayName.isEmpty();
+	NameButton->setText(CustomDisplayName);
 	if (NameButton->text().isEmpty())
 		NameButton->setText(BaseText);
 	const QString DisplayColor = SupportsDisplayName(ItemType) ? DisplayColorForEntry(FavoriteKey) : QString();
+	QString NameButtonStyle;
 	if (!DisplayColor.isEmpty())
-		NameButton->setStyleSheet(QString("color:%1; font-weight:700;").arg(DisplayColor));
+		NameButtonStyle = QString("color:%1;").arg(DisplayColor);
+	if (HasCustomDisplayName)
+		NameButtonStyle += "font-weight:700;";
+	if (!NameButtonStyle.isEmpty())
+		NameButton->setStyleSheet(NameButtonStyle);
 	connect(NameButton, &QPushButton::clicked, this, [=]()
 	{
 		mFileListWidget->setCurrentItem(Item);
@@ -3528,6 +6788,14 @@ QWidget* mlMainWindow::CreateItemTitleWidget(QTreeWidgetItem* Item, int ItemType
 		Layout->addWidget(TypeTag, 0, Qt::AlignVCenter);
 	}
 	Layout->addStretch(1);
+	if (ItemType == ML_ITEM_MAP || ItemType == ML_ITEM_MOD_GROUP)
+	{
+		QLabel* SizeLabel = new QLabel(FormatDataSizeBytes(ItemDiskSizeBytes(ItemType, ContainerName, EntryName)), Widget);
+		SizeLabel->setObjectName("ItemSizeLabel");
+		SizeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+		SizeLabel->setToolTip(QString("Total size on disk for %1").arg(QDir::toNativeSeparators(ItemContentRoot(ItemType, ContainerName, EntryName))));
+		Layout->addWidget(SizeLabel, 0, Qt::AlignRight | Qt::AlignVCenter);
+	}
 
 	RowLayout->addWidget(Widget, 1);
 	if (QWidget* ActionsWidget = CreateQuickActionsWidget(Item, ItemType, ContainerName, EntryName, FavoriteKey, IsChildRow))
@@ -3537,37 +6805,13 @@ QWidget* mlMainWindow::CreateItemTitleWidget(QTreeWidgetItem* Item, int ItemType
 
 QWidget* mlMainWindow::CreateQuickActionsWidget(QTreeWidgetItem* Item, int ItemType, const QString& ContainerName, const QString& EntryName, const QString& FavoriteKey, bool IsChildRow)
 {
+	Q_UNUSED(Item);
+	Q_UNUSED(ItemType);
+	Q_UNUSED(ContainerName);
+	Q_UNUSED(EntryName);
 	Q_UNUSED(FavoriteKey);
-
-	if (ItemType == ML_ITEM_UNKNOWN)
-		return NULL;
-
-	const bool UseClassicChrome = ThemeUsesClassicChrome(mThemeMode);
-	QWidget* Widget = new QWidget(mFileListWidget);
-	Widget->setObjectName("QuickActionStrip");
-	Widget->setAttribute(Qt::WA_StyledBackground, true);
-	Widget->setProperty("childRow", IsChildRow);
-	Widget->setProperty("selected", mFileListWidget && mFileListWidget->currentItem() == Item);
-		Widget->setFixedHeight(UseClassicChrome ? 14 : 34);
-	QHBoxLayout* Layout = new QHBoxLayout(Widget);
-		Layout->setContentsMargins(UseClassicChrome ? 0 : 6, UseClassicChrome ? 0 : 2, UseClassicChrome ? 0 : 8, UseClassicChrome ? 0 : 2);
-	Layout->setSpacing(1);
-
-	auto MakeButton = [&](const QString& Text, const QString& ToolTip, QStyle::StandardPixmap IconType, bool LinkAction, bool RunAction) -> void
-	{
-			QPushButton* Button = new QPushButton(style()->standardIcon(IconType), Text, Widget);
-			Button->setObjectName("QuickActionButton");
-			Button->setToolTip(ToolTip);
-			Button->setCursor(Qt::PointingHandCursor);
-				Button->setMinimumSize(UseClassicChrome ? 30 : 54, UseClassicChrome ? 14 : 22);
-			connect(Button, &QPushButton::clicked, this, [=]() { RunQuickAction(ItemType, ContainerName, EntryName, LinkAction, RunAction); });
-			Layout->addWidget(Button);
-		};
-
-	MakeButton("Link", ItemType == ML_ITEM_MAP ? "Link map" : (ItemType == ML_ITEM_MOD_GROUP ? "Link full mod" : "Link zone"), QStyle::SP_ArrowForward, true, false);
-	MakeButton("Run", ItemType == ML_ITEM_MAP ? "Run map" : "Run mod", QStyle::SP_MediaPlay, false, true);
-
-	return Widget;
+	Q_UNUSED(IsChildRow);
+	return NULL;
 }
 
 void mlMainWindow::SyncItemSelectionWidget(QTreeWidgetItem* Item) const
@@ -3590,7 +6834,8 @@ void mlMainWindow::SyncItemSelectionWidget(QTreeWidgetItem* Item) const
 		Widget->update();
 	};
 
-	ApplySelectionState(RowWidget->findChild<QWidget*>("ItemTitleWidget"));
+	QWidget* TitleWidget = RowWidget->findChild<QWidget*>("ItemTitleWidget");
+	ApplySelectionState(TitleWidget);
 	ApplySelectionState(RowWidget->findChild<QWidget*>("QuickActionStrip"));
 }
 
@@ -3684,6 +6929,9 @@ void mlMainWindow::RunQuickAction(int ItemType, const QString& ContainerName, co
 	}
 
 	if (RunAction)
+		QueueGameStatsForItem(ItemType == ML_ITEM_MAP ? QString("map:%1").arg(EntryName.toLower()) : QString("mod:%1").arg(ContainerName.toLower()));
+
+	if (RunAction)
 	{
 		Commands.append(CreateGameLaunchCommand(ItemType == ML_ITEM_MAP ? EntryName : ContainerName, ItemType == ML_ITEM_MAP ? EntryName : QString()));
 	}
@@ -3750,14 +6998,13 @@ void mlMainWindow::UpdateBackgroundOverlays()
 
 void mlMainWindow::PopulateFileList()
 {
+	AppendStartupTrace("PopulateFileList:start");
 	mFileListWidget->clear();
 	QSettings Settings;
-	const bool ShowRecents = Settings.value("ShowRecents", true).toBool();
-	const bool ShowFavorites = Settings.value("ShowFavorites", true).toBool();
 	const QStringList Favorites = FavoriteEntries();
 	const QStringList Recents = RecentEntries();
 	QHash<QString, QVariantMap> Lookup;
-	const int ActiveTab = mCategoryTabs ? mCategoryTabs->currentIndex() : CategoryZMMaps;
+	const QString ActiveTab = CurrentCategoryTabKey(mCategoryTabs);
 	const int StandardRowHeight = TreeRowHeightForTheme(mThemeMode, false);
 	QTreeWidgetItem* RecentsRootItem = NULL;
 	QTreeWidgetItem* FavoritesRootItem = NULL;
@@ -3780,36 +7027,44 @@ void mlMainWindow::PopulateFileList()
 			Lookup.insert(FavoriteKey, QVariantMap{ { "type", ItemType }, { "container", ContainerName }, { "entry", EntryName }, { "display", DisplayText } });
 		mFileListWidget->setItemWidget(Item, 0, CreateItemTitleWidget(Item, ItemType, ContainerName, EntryName, FavoriteKey, DisplayText));
 	};
+	auto ConfigureSectionRoot = [&](QTreeWidgetItem* Item, const QString& Label)
+	{
+		if (!Item)
+			return;
+
+		Item->setText(0, Label);
+		Item->setData(0, Qt::UserRole, ML_ITEM_UNKNOWN);
+		Item->setFlags(Item->flags() & ~Qt::ItemIsUserCheckable);
+		Item->setForeground(0, QBrush(Qt::transparent));
+		Item->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+
+		QWidget* HeaderWidget = new QWidget(mFileListWidget);
+		HeaderWidget->setObjectName("ItemRowWidget");
+		HeaderWidget->setAttribute(Qt::WA_StyledBackground, true);
+		QHBoxLayout* HeaderLayout = new QHBoxLayout(HeaderWidget);
+		HeaderLayout->setContentsMargins(12, 4, 8, 4);
+		HeaderLayout->setSpacing(0);
+		QLabel* HeaderLabel = new QLabel(Label, HeaderWidget);
+		QFont HeaderFont = HeaderLabel->font();
+		HeaderFont.setBold(true);
+		HeaderLabel->setFont(HeaderFont);
+		HeaderLabel->setStyleSheet("background: transparent;");
+		HeaderLayout->addWidget(HeaderLabel, 0, Qt::AlignVCenter | Qt::AlignLeft);
+		HeaderLayout->addStretch(1);
+		Item->setSizeHint(0, QSize(0, StandardRowHeight));
+		mFileListWidget->setItemWidget(Item, 0, HeaderWidget);
+	};
 
 	QString UserMapsFolder = QDir::cleanPath(QString("%1/usermaps/").arg(mGamePath));
 	QStringList UserMaps = QDir(UserMapsFolder).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
-	if (ActiveTab == CategoryAll)
+	if (ActiveTab == "all")
 	{
-		RecentsRootItem = ShowRecents ? new QTreeWidgetItem(mFileListWidget, QStringList() << "Recents") : NULL;
-		FavoritesRootItem = ShowFavorites ? new QTreeWidgetItem(mFileListWidget, QStringList() << "Favorites") : NULL;
 		MapsRootItem = new QTreeWidgetItem(mFileListWidget, QStringList() << "Maps");
 		ModsRootItem = new QTreeWidgetItem(mFileListWidget, QStringList() << "Mods");
-
-		QFont Font = MapsRootItem->font(0);
-		Font.setBold(true);
-		if (RecentsRootItem)
-		{
-			RecentsRootItem->setFont(0, Font);
-			RecentsRootItem->setFirstColumnSpanned(true);
-			RecentsRootItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-		}
-		if (FavoritesRootItem)
-		{
-			FavoritesRootItem->setFont(0, Font);
-			FavoritesRootItem->setFirstColumnSpanned(true);
-			FavoritesRootItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-		}
-		MapsRootItem->setFont(0, Font);
 		MapsRootItem->setFirstColumnSpanned(true);
-		MapsRootItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-		ModsRootItem->setFont(0, Font);
 		ModsRootItem->setFirstColumnSpanned(true);
-		ModsRootItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+		ConfigureSectionRoot(MapsRootItem, "Maps");
+		ConfigureSectionRoot(ModsRootItem, "Mods");
 	}
 
 	for (QString MapName : UserMaps)
@@ -3820,12 +7075,12 @@ void mlMainWindow::PopulateFileList()
 		if (QFileInfo(ZoneFileName).isFile())
 		{
 			Lookup.insert(FavoriteKey, QVariantMap{ { "type", ML_ITEM_MAP }, { "container", MapName }, { "entry", MapName }, { "display", MapName } });
-			if (ActiveTab == CategoryAll)
+			if (ActiveTab == "all")
 			{
 				QTreeWidgetItem* MapItem = new QTreeWidgetItem(MapsRootItem, QStringList() << MapName);
 				ConfigureItem(MapItem, ML_ITEM_MAP, MapName, MapName, FavoriteKey, MapName, StandardRowHeight);
 			}
-			else if (ActiveTab == CategoryZMMaps || ActiveTab == CategoryMPMaps)
+			else if (ActiveTab == "zm-maps" || ActiveTab == "mp-maps")
 			{
 				if (!MapMatchesCurrentTab(MapName))
 					continue;
@@ -3854,12 +7109,12 @@ void mlMainWindow::PopulateFileList()
 				QString FavoriteKey = QString("mod:%1/%2").arg(ModName.toLower(), QString(Files[FileIdx]).toLower());
 				Lookup.insert(FavoriteKey, QVariantMap{ { "type", ML_ITEM_MOD }, { "container", ModName }, { "entry", QString(Files[FileIdx]) }, { "display", QString(Files[FileIdx]) } });
 
-				if (ActiveTab != CategoryMods && ActiveTab != CategoryAll)
+				if (ActiveTab != "mods" && ActiveTab != "all")
 					continue;
 
 				if (!ParentItem)
 				{
-					if (ActiveTab == CategoryAll)
+					if (ActiveTab == "all")
 						ParentItem = new QTreeWidgetItem(ModsRootItem, QStringList() << ModName);
 					else
 						ParentItem = new QTreeWidgetItem(mFileListWidget, QStringList() << ModName);
@@ -3874,30 +7129,41 @@ void mlMainWindow::PopulateFileList()
 		}
 	}
 
-	if (ActiveTab == CategoryRecent)
+	if (ActiveTab == "recent")
 		PopulatePinnedRoot(mFileListWidget->invisibleRootItem(), Recents, Lookup);
-	else if (ActiveTab == CategoryFavorites)
+	else if (ActiveTab == "favorites")
 		PopulatePinnedRoot(mFileListWidget->invisibleRootItem(), Favorites, Lookup);
-	else if (ActiveTab == CategoryAll)
+	else if (ActiveTab == "all")
 	{
-		if (RecentsRootItem)
-			PopulatePinnedRoot(RecentsRootItem, Recents, Lookup);
-		if (FavoritesRootItem)
-			PopulatePinnedRoot(FavoritesRootItem, Favorites, Lookup);
-		MapsRootItem->sortChildren(0, Qt::AscendingOrder);
-		ModsRootItem->sortChildren(0, Qt::AscendingOrder);
-		if (RecentsRootItem)
-			RecentsRootItem->setExpanded(Settings.value(SectionSettingKey("Recents") + "/Expanded", true).toBool());
-		if (FavoritesRootItem)
-			FavoritesRootItem->setExpanded(Settings.value(SectionSettingKey("Favorites") + "/Expanded", true).toBool());
-		MapsRootItem->setExpanded(true);
-		ModsRootItem->setExpanded(true);
+		auto RemoveRootIfEmpty = [&](QTreeWidgetItem*& RootItem)
+		{
+			if (!RootItem || RootItem->childCount() > 0)
+				return;
+
+			const int RootIndex = mFileListWidget->indexOfTopLevelItem(RootItem);
+			if (RootIndex >= 0)
+				delete mFileListWidget->takeTopLevelItem(RootIndex);
+				RootItem = NULL;
+			};
+		RemoveRootIfEmpty(MapsRootItem);
+		RemoveRootIfEmpty(ModsRootItem);
+		if (MapsRootItem)
+			MapsRootItem->sortChildren(0, Qt::AscendingOrder);
+		if (ModsRootItem)
+			ModsRootItem->sortChildren(0, Qt::AscendingOrder);
+		if (MapsRootItem)
+			MapsRootItem->setExpanded(Settings.value(SectionSettingKey("Maps") + "/Expanded", true).toBool());
+		if (ModsRootItem)
+			ModsRootItem->setExpanded(Settings.value(SectionSettingKey("Mods") + "/Expanded", true).toBool());
 	}
 
-	if (ActiveTab != CategoryAll)
+	if (ActiveTab != "all")
 		mFileListWidget->sortItems(0, Qt::AscendingOrder);
 
+	UpdateCategorySummary(Lookup, Recents, Favorites);
+	UpdateQuickLaunchVisibility();
 	UpdateBuildActionButtons();
+	AppendStartupTrace(QString("PopulateFileList:done items=%1").arg(mFileListWidget ? mFileListWidget->topLevelItemCount() : -1));
 }
 
 void mlMainWindow::OnEditReadyForPublish()
@@ -3924,12 +7190,12 @@ void mlMainWindow::OnEditReadyForPublish()
 	CollectCheckedOnly(mFileListWidget->invisibleRootItem());
 	if (CheckedItems.isEmpty())
 	{
-		QMessageBox::critical(this, "Ready for Publish", "No items are checked. Check at least one map or mod before using Ready for Publish.");
+		QMessageBox::critical(this, "Publish Check", "No items are checked. Check at least one map or mod before using Publish Check.");
 		return;
 	}
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Ready for Publish");
+	Dialog.setWindowTitle("Publish Check");
 	Dialog.resize(860, 320);
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 
@@ -4045,13 +7311,17 @@ void mlMainWindow::OnEditReadyForPublish()
 	StartBuildThread(Commands);
 }
 
-void mlMainWindow::ContextMenuRequested()
+void mlMainWindow::ContextMenuRequested(const QPoint& Position)
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	if (!mFileListWidget)
 		return;
 
-	QTreeWidgetItem* Item = ItemList[0];
+	QTreeWidgetItem* Item = mFileListWidget->itemAt(Position);
+	if (!Item)
+		Item = mFileListWidget->currentItem();
+	if (!Item)
+		return;
+
 	const int ItemTypeId = Item->data(0, Qt::UserRole).toInt();
 	QString ItemType = (ItemTypeId == ML_ITEM_MAP) ? "Map" : "Mod";
 
@@ -4069,7 +7339,12 @@ void mlMainWindow::ContextMenuRequested()
 		" padding: 4px 8px; text-align: left; font-weight: 700; }"
 		"#DangerMenuButton:hover { background: #4a2020; border: 0; color: #ff9f66; }"
 		"#DangerMenuButton:pressed { background: #351616; border: 0; color: #ffb0b0; }");
-	Menu->addAction(GameIcon, QString("Run %1").arg(ItemType), this, SLOT(OnRunMapOrMod()));
+		QAction* RunAction = Menu->addAction(GameIcon, QString("Run %1").arg(ItemType), this, SLOT(OnRunMapOrMod()));
+		RunAction->setEnabled(ItemCheckState(Item) == Qt::Checked);
+	Menu->addSeparator();
+	QAction* InformationAction = Menu->addAction(style()->standardIcon(QStyle::SP_FileDialogInfoView), "Information");
+	connect(InformationAction, &QAction::triggered, this, [=]() { ShowItemInformationDialog(Item); });
+	Menu->addSeparator();
 
 	if (ItemTypeId == ML_ITEM_MAP)
 		Menu->addAction(mActionFileLevelEditor);
@@ -4095,6 +7370,8 @@ void mlMainWindow::ContextMenuRequested()
 		OnEditPublish();
 	});
 	Menu->addAction(QString("Open %1 Folder").arg(ItemType), this, SLOT(OnOpenModRootFolder()));
+	Menu->addAction(QString("Rename %1...").arg(ItemType), this, SLOT(OnRenameItem()));
+	Menu->addAction(QString("Analyze %1...").arg(ItemType), this, SLOT(OnAnalyzeItem()));
 	Menu->addAction(IsFavoriteEntry(GetItemFavoriteKey(Item)) ? "Remove Favorite" : "Add Favorite", this, SLOT(OnToggleFavorite()));
 	QAction* NotesAction = Menu->addAction("Notes...");
 	connect(NotesAction, &QAction::triggered, this, [=]() { EditNotesForItem(Item); });
@@ -4136,45 +7413,56 @@ void mlMainWindow::ContextMenuRequested()
 	DeleteAction->setDefaultWidget(DeleteWidget);
 	Menu->addAction(DeleteAction);
 
-	Menu->exec(QCursor::pos());
+	mFileListWidget->setCurrentItem(Item);
+	Menu->exec(mFileListWidget->viewport()->mapToGlobal(Position));
 }
 
 void mlMainWindow::OnFileAssetEditor()
 {
 	QProcess* Process = new QProcess();
-	connect(Process, SIGNAL(finished(int)), Process, SLOT(deleteLater()));
+	TrackProcessLifetime(Process, "Stats/AssetEditorLaunches", "Stats/AssetEditorSeconds");
 	Process->start(QString("%1/bin/AssetEditor_modtools.exe").arg(mToolsPath), QStringList());
 }
 
 void mlMainWindow::OnFileLevelEditor()
 {
-	QTreeWidgetItem* CheckedMap = NULL;
-	std::function<void(QTreeWidgetItem*)> FindCheckedMap = [&](QTreeWidgetItem* Parent)
-	{
-		for (int ChildIdx = 0; ChildIdx < Parent->childCount() && !CheckedMap; ChildIdx++)
-		{
-			QTreeWidgetItem* Child = Parent->child(ChildIdx);
-			if (ItemCheckState(Child) == Qt::Checked && Child->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
-			{
-				CheckedMap = Child;
-				return;
-			}
-			FindCheckedMap(Child);
-		}
-	};
-	FindCheckedMap(mFileListWidget->invisibleRootItem());
-
-	if (CheckedMap)
+	auto LaunchRadiant = [this](const QString& MapName, const QString& FavoriteKey)
 	{
 		QProcess* Process = new QProcess();
-		connect(Process, SIGNAL(finished(int)), Process, SLOT(deleteLater()));
-		QString MapName = GetItemEntryName(CheckedMap);
-		TouchRecentEntry(GetItemFavoriteKey(CheckedMap));
-		Process->start(QString("%1/bin/radiant_modtools.exe").arg(mToolsPath), QStringList() << QString("%1/map_source/%2/%3.map").arg(mGamePath, MapName.left(2), MapName));
+		if (!FavoriteKey.isEmpty())
+		{
+			TouchRecentEntry(FavoriteKey);
+			TrackProcessLifetime(Process, "Stats/RadiantLaunches", "Stats/RadiantSeconds", "Stats/ItemsRadiantSeconds", FavoriteKey);
+			Process->start(QString("%1/bin/radiant_modtools.exe").arg(mToolsPath), QStringList() << QString("%1/map_source/%2/%3.map").arg(mGamePath, MapName.left(2), MapName));
+		}
+		else
+		{
+			TrackProcessLifetime(Process, "Stats/RadiantLaunches", "Stats/RadiantSeconds", "Stats/ItemsRadiantSeconds", "radiant:empty");
+			Process->start(QString("%1/bin/radiant_modtools.exe").arg(mToolsPath));
+		}
+	};
+
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item || Item->data(0, Qt::UserRole).toInt() != ML_ITEM_MAP)
+	{
+		QMessageBox Prompt(this);
+		Prompt.setIcon(QMessageBox::Warning);
+		Prompt.setWindowTitle("Open Radiant");
+		Prompt.setText("No map selected.");
+		Prompt.setInformativeText("Select a map first, or open an empty Radiant session.");
+		QPushButton* EmptyButton = Prompt.addButton("Empty Radiant Map", QMessageBox::AcceptRole);
+		Prompt.addButton("Cancel", QMessageBox::RejectRole);
+		Prompt.exec();
+		if (Prompt.clickedButton() == EmptyButton)
+			LaunchRadiant(QString(), QString());
 		return;
 	}
 
-	QMessageBox::warning(this, "Open in Radiant", "Check a map first, then try Open in Radiant again.");
+	const QString MapName = GetItemEntryName(Item);
+	const QString FavoriteKey = GetItemFavoriteKey(Item);
+	if (MapName.isEmpty())
+		return;
+	LaunchRadiant(MapName, FavoriteKey);
 }
 
 void mlMainWindow::OnFileExport2Bin()
@@ -4201,36 +7489,124 @@ void mlMainWindow::OnFileNew()
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
 	Dialog.setWindowTitle("New Map or Mod");
+	Dialog.resize(560, 300);
+	Dialog.setMinimumSize(500, 260);
 
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+	Layout->setContentsMargins(14, 8, 14, 10);
+	Layout->setSpacing(8);
+	QLabel* IntroLabel = new QLabel("Create a new map or mod.", &Dialog);
+	IntroLabel->setWordWrap(true);
+	QFont IntroFont = IntroLabel->font();
+	IntroFont.setPointSize(IntroFont.pointSize() + 2);
+	IntroFont.setBold(true);
+	IntroLabel->setFont(IntroFont);
+	Layout->addWidget(IntroLabel);
+
+	QLabel* NamingLabel = new QLabel("Naming scheme: multiplayer maps use mp_*, zombie maps use zm_*, and mods use your mod folder name.", &Dialog);
+	NamingLabel->setWordWrap(true);
+	Layout->addWidget(NamingLabel);
 
 	QFormLayout* FormLayout = new QFormLayout();
+	FormLayout->setContentsMargins(0, 0, 0, 0);
+	FormLayout->setHorizontalSpacing(10);
+	FormLayout->setVerticalSpacing(8);
 	Layout->addLayout(FormLayout);
 
 	QLineEdit* NameWidget = new QLineEdit();
 	NameWidget->setValidator(new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_]*"), this));
+	NameWidget->setPlaceholderText("zm_example");
 	FormLayout->addRow("Name:", NameWidget);
 
+	QLineEdit* DisplayNameWidget = new QLineEdit(&Dialog);
+	DisplayNameWidget->setPlaceholderText("Leviathan");
+	FormLayout->addRow("Display name:", DisplayNameWidget);
+
+	QLineEdit* ColorEdit = new QLineEdit(&Dialog);
+	ColorEdit->hide();
+	QPushButton* ColorBrowseButton = new QPushButton(&Dialog);
+	ColorBrowseButton->setCursor(Qt::PointingHandCursor);
+	ColorBrowseButton->setFixedSize(28, 28);
+	ColorBrowseButton->setToolTip("Click to pick the preview color.");
+	QWidget* ColorRowWidget = new QWidget(&Dialog);
+	QHBoxLayout* ColorRowLayout = new QHBoxLayout(ColorRowWidget);
+	ColorRowLayout->setContentsMargins(0, 0, 0, 0);
+	ColorRowLayout->setSpacing(6);
+	ColorRowLayout->addWidget(ColorBrowseButton);
+	ColorRowLayout->addWidget(new QLabel("Selection color:", &Dialog));
+	ColorRowLayout->addStretch();
+	FormLayout->addRow(ColorRowWidget);
+
 	QComboBox* TemplateWidget = new QComboBox();
-	TemplateWidget->addItems(Templates);
+	for (const QString& TemplateName : Templates)
+	{
+		QString DisplayLabel = TemplateName;
+		if (TemplateName.compare("ZM Mod Level", Qt::CaseInsensitive) == 0)
+			DisplayLabel = "Zombie Map (ZM Mod Level)";
+		else if (TemplateName.compare("MP Mod Level", Qt::CaseInsensitive) == 0)
+			DisplayLabel = "Multiplayer Map (MP Mod Level)";
+		else if (TemplateName.compare("mod", Qt::CaseInsensitive) == 0)
+			DisplayLabel = "Mod (mod)";
+		TemplateWidget->addItem(DisplayLabel, TemplateName);
+	}
+	const int DefaultTemplateIndex = TemplateWidget->findData("ZM Mod Level");
+	TemplateWidget->setCurrentIndex(DefaultTemplateIndex >= 0 ? DefaultTemplateIndex : 0);
 	FormLayout->addRow("Template:", TemplateWidget);
+	auto RefreshAutoFields = [=]()
+	{
+		const QString Name = NameWidget->text().trimmed();
+		const QString RawTemplateName = TemplateWidget->currentData().toString();
+		const bool IsMapTemplate = RawTemplateName.compare("ZM Mod Level", Qt::CaseInsensitive) == 0
+			|| RawTemplateName.compare("MP Mod Level", Qt::CaseInsensitive) == 0;
+		if (ColorEdit->text().trimmed().isEmpty())
+			ColorEdit->setPlaceholderText(Name.isEmpty() ? "Auto color" : DefaultDisplayColorForEntryName(Name, IsMapTemplate));
+		ColorBrowseButton->setStyleSheet(QString("text-align:left; background:%1; border:1px solid #6a6a6a; border-radius:6px;").arg(
+			NormalizedStoredColor(ColorEdit->text()).isEmpty()
+				? (Name.isEmpty() ? QString("#444444") : DefaultDisplayColorForEntryName(Name, IsMapTemplate))
+				: NormalizedStoredColor(ColorEdit->text())));
+	};
+	connect(NameWidget, &QLineEdit::textChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
+	connect(TemplateWidget, &QComboBox::currentTextChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
+	connect(ColorEdit, &QLineEdit::textChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
+	connect(ColorBrowseButton, &QPushButton::clicked, &Dialog, [&, ColorEdit]()
+	{
+		const QColor Picked = QColorDialog::getColor(QColor(ColorEdit->text()), &Dialog, "Select Selection Color");
+		if (Picked.isValid())
+			ColorEdit->setText(Picked.name(QColor::HexRgb));
+	});
+	RefreshAutoFields();
 
-	QFrame* Frame = new QFrame();
-	Frame->setFrameShape(QFrame::HLine);
-	Frame->setFrameShadow(QFrame::Raised);
-	Layout->addWidget(Frame);
+	QHBoxLayout* ButtonRow = new QHBoxLayout();
+	QPushButton* CancelButton = new QPushButton("Cancel", &Dialog);
+	ButtonRow->addWidget(CancelButton);
+	ButtonRow->addStretch();
+	QPushButton* CreateButton = new QPushButton("Create", &Dialog);
+	ButtonRow->addWidget(CreateButton);
+	Layout->addLayout(ButtonRow);
+	int RequestedCreationMode = -1;
 
-	QDialogButtonBox* ButtonBox = new QDialogButtonBox(&Dialog);
-	ButtonBox->setOrientation(Qt::Horizontal);
-	ButtonBox->setStandardButtons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-	ButtonBox->setCenterButtons(true);
-
-	Layout->addWidget(ButtonBox);
-
-	connect(ButtonBox, SIGNAL(accepted()), &Dialog, SLOT(accept()));
-	connect(ButtonBox, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	const auto TemplateIsMap = [TemplateWidget]()
+	{
+		const QString TemplateName = TemplateWidget->currentData().toString();
+		return TemplateName.compare("mod", Qt::CaseInsensitive) != 0;
+	};
+	connect(CreateButton, &QPushButton::clicked, &Dialog, [&]()
+	{
+		RequestedCreationMode = TemplateIsMap() ? 1 : 0;
+		Dialog.accept();
+	});
+	connect(CancelButton, &QPushButton::clicked, &Dialog, [&]()
+	{
+		Dialog.reject();
+	});
 
 	if (Dialog.exec() != QDialog::Accepted)
+		return;
+
+	const QString Template = TemplateWidget->currentData().toString();
+	const bool IsMapTemplate = Template.compare("mod", Qt::CaseInsensitive) != 0;
+	const bool CreateMap = RequestedCreationMode == 1;
+	if (RequestedCreationMode < 0)
 		return;
 
 	QString Name = NameWidget->text();
@@ -4249,10 +7625,10 @@ void mlMainWindow::OnFileNew()
 
 	QByteArray MapName = NameWidget->text().toLatin1().toLower();
 	QString Output;
+	const QString CustomDisplayName = DisplayNameWidget->text().trimmed();
+	const QString CustomDisplayColor = NormalizedStoredColor(ColorEdit->text());
 
-	QString Template = Templates[TemplateWidget->currentIndex()];
-
-	if ((Template == "MP Mod Level" && !MapName.startsWith("mp_")) || (Template == "ZM Mod Level" && !MapName.startsWith("zm_")))
+	if (CreateMap && ((Template == "MP Mod Level" && !MapName.startsWith("mp_")) || (Template == "ZM Mod Level" && !MapName.startsWith("zm_"))))
 	{
 		QMessageBox::information(this, "Error", "Map name must start with 'mp_' or 'zm_'.");
 		return;
@@ -4305,6 +7681,16 @@ void mlMainWindow::OnFileNew()
 
 	if (RecursiveCopy(TemplatesFolder.absolutePath() + QDir::separator() + Templates[TemplateWidget->currentIndex()], QDir::cleanPath(mGamePath)))
 	{
+		const bool CreatedMap = QDir(QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, Name))).exists();
+		const bool CreatedMod = QDir(QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, Name))).exists();
+		if (CreatedMap || CreatedMod)
+		{
+			const QString FavoriteKey = CreatedMap ? QString("map:%1").arg(Name.toLower()) : QString("mod:%1").arg(Name.toLower());
+			if (DisplayNameForEntry(FavoriteKey).isEmpty())
+				SetDisplayNameForEntry(FavoriteKey, CustomDisplayName.isEmpty() ? DefaultDisplayNameForEntryName(Name) : CustomDisplayName);
+			if (DisplayColorForEntry(FavoriteKey).isEmpty())
+				SetDisplayColorForEntry(FavoriteKey, CustomDisplayColor.isEmpty() ? DefaultDisplayColorForEntryName(Name, CreatedMap) : CustomDisplayColor);
+		}
 		PopulateFileList();
 
 		QMessageBox::information(this, "New Map Created", QString("Files created:\n") + Output);
@@ -4373,9 +7759,6 @@ void mlMainWindow::StartBuild(BuildLanguageMode Mode)
 		&& mLightEnabledWidget && !mLightEnabledWidget->isChecked()
 		&& mLinkEnabledWidget && !mLinkEnabledWidget->isChecked();
 
-	if (RunOnlyMode && Mode == BuildEnglishOnly)
-		return;
-
 	if (mBuildThread)
 	{
 		if (mActiveBuildButton == TriggerButton)
@@ -4394,15 +7777,10 @@ void mlMainWindow::StartBuild(BuildLanguageMode Mode)
 		}
 	};
 
-	QList<QTreeWidgetItem*> CheckedItems = CollectTargetItems();
-	if (CheckedItems.isEmpty() && RunOnlyMode && mFileListWidget && mFileListWidget->currentItem()
-		&& mFileListWidget->currentItem()->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN)
-	{
-		CheckedItems.append(mFileListWidget->currentItem());
-	}
-	if (CheckedItems.isEmpty())
-	{
-		QMessageBox::warning(this, "Build", "Please select at least one file from the list.");
+		QList<QTreeWidgetItem*> CheckedItems = CollectTargetItems();
+		if (CheckedItems.isEmpty())
+		{
+			QMessageBox::warning(this, "Build", "Please select at least one file from the list.");
 		return;
 	}
 	QString LastMap, LastMod;
@@ -4508,6 +7886,7 @@ void mlMainWindow::StartBuild(BuildLanguageMode Mode)
 
 	if (mRunEnabledWidget->isChecked() && (!LastMod.isEmpty() || !LastMap.isEmpty()))
 	{
+		QueueGameStatsForItem(LastMap.isEmpty() ? QString("mod:%1").arg(LastMod.toLower()) : QString("map:%1").arg(LastMap.toLower()));
 		Commands.append(CreateGameLaunchCommand(LastMod.isEmpty() ? LastMap : LastMod, LastMap));
 	}
 
@@ -5046,6 +8425,10 @@ void mlMainWindow::OnEditOptions()
 	QCheckBox* ShowFavoritesCheckbox = new QCheckBox("Enable Favorites");
 	ShowFavoritesCheckbox->setChecked(Settings.value("ShowFavorites", true).toBool());
 	GeneralLayout->addWidget(ShowFavoritesCheckbox);
+	QCheckBox* ShowStartupQuoteCheckbox = new QCheckBox("Show inspirational quote on startup");
+	ShowStartupQuoteCheckbox->setChecked(Settings.value("ShowStartupQuote", false).toBool());
+	ShowStartupQuoteCheckbox->setToolTip("Show a random quote when the launcher opens.");
+	GeneralLayout->addWidget(ShowStartupQuoteCheckbox);
 
 	QFrame* PinnedFrame = new QFrame();
 	PinnedFrame->setFrameShape(QFrame::HLine);
@@ -5075,6 +8458,367 @@ void mlMainWindow::OnEditOptions()
 	GeneralLayout->addWidget(DeleteApeCacheButton, 0, Qt::AlignLeft);
 	GeneralLayout->addStretch(1);
 	AddSettingsPage("General", style()->standardIcon(QStyle::SP_FileDialogDetailedView), GeneralTab);
+
+	QList<ToolbarItemConfig> ToolbarItems = LoadToolbarItems();
+	int ToolbarSelectedIndex = -1;
+	bool ToolbarUiUpdating = false;
+
+	auto ToolbarItemIcon = [&](const ToolbarItemConfig& Item) -> QIcon
+	{
+		if (!Item.IconPath.trimmed().isEmpty() && QFileInfo(Item.IconPath).exists())
+			return QIcon(Item.IconPath);
+		if (Item.BuiltIn && Item.BuiltInActionKey == "extra-tools-menu")
+			return ToolbarIconForActionKey("extra-tools-menu");
+		QAction* BuiltInAction = Item.BuiltIn ? FindBuiltinToolbarAction(this, Item.BuiltInActionKey) : NULL;
+		if (BuiltInAction)
+			return BuiltInAction->icon();
+		return style()->standardIcon(QStyle::SP_FileIcon);
+	};
+
+	auto ToolbarItemText = [&](const ToolbarItemConfig& Item) -> QString
+	{
+		QString Text = Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString("Custom Item")) : Item.Label;
+		if (Item.Hidden)
+			Text += " [hidden]";
+		return Text;
+	};
+
+	QWidget* ToolbarTab = new QWidget(&Dialog);
+	QHBoxLayout* ToolbarLayout = new QHBoxLayout(ToolbarTab);
+	ToolbarLayout->setContentsMargins(14, 14, 14, 14);
+	ToolbarLayout->setSpacing(12);
+
+	QListWidget* ToolbarList = new QListWidget(ToolbarTab);
+	ToolbarList->setObjectName("ToolbarSettingsList");
+	ToolbarList->setIconSize(QSize(20, 20));
+	ToolbarList->setSelectionMode(QAbstractItemView::SingleSelection);
+	ToolbarList->setMinimumWidth(280);
+	ToolbarLayout->addWidget(ToolbarList, 0);
+
+	QVBoxLayout* ToolbarDetailLayout = new QVBoxLayout();
+	ToolbarDetailLayout->setSpacing(10);
+	ToolbarLayout->addLayout(ToolbarDetailLayout, 1);
+
+	QLabel* ToolbarNameLabel = new QLabel("Item:");
+	QLabel* ToolbarNameValue = new QLabel("-");
+	ToolbarNameValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	ToolbarDetailLayout->addWidget(ToolbarNameLabel);
+	ToolbarDetailLayout->addWidget(ToolbarNameValue);
+
+	QLabel* ToolbarFunctionLabel = new QLabel("Functionality:");
+	QLabel* ToolbarFunctionValue = new QLabel("-");
+	ToolbarFunctionValue->setWordWrap(true);
+	ToolbarFunctionValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	ToolbarDetailLayout->addWidget(ToolbarFunctionLabel);
+	ToolbarDetailLayout->addWidget(ToolbarFunctionValue);
+
+	QHBoxLayout* ToolbarIconLayout = new QHBoxLayout();
+	ToolbarIconLayout->addWidget(new QLabel("Icon:"));
+	BackgroundDropLineEdit* ToolbarIconEdit = new BackgroundDropLineEdit();
+	ToolbarIconEdit->setPlaceholderText("Drop an icon file here or browse...");
+	ToolbarIconLayout->addWidget(ToolbarIconEdit, 1);
+	QPushButton* ToolbarIconBrowse = new QPushButton("Browse...");
+	ToolbarIconLayout->addWidget(ToolbarIconBrowse);
+	ToolbarDetailLayout->addLayout(ToolbarIconLayout);
+
+	QCheckBox* ToolbarHiddenCheck = new QCheckBox("Hide from toolbar");
+	ToolbarDetailLayout->addWidget(ToolbarHiddenCheck);
+
+	QFrame* ToolbarDivider = new QFrame();
+	ToolbarDivider->setFrameShape(QFrame::HLine);
+	ToolbarDetailLayout->addWidget(ToolbarDivider);
+
+	QHBoxLayout* ToolbarButtonsLayout = new QHBoxLayout();
+	QPushButton* ToolbarMoveUpButton = new QPushButton("Move Up");
+	QPushButton* ToolbarMoveDownButton = new QPushButton("Move Down");
+	QPushButton* ToolbarAddButton = new QPushButton("Add Custom Item");
+	QPushButton* ToolbarEditButton = new QPushButton("Edit Custom Item");
+	QPushButton* ToolbarRemoveButton = new QPushButton("Remove Custom Item");
+	QPushButton* ToolbarResetButton = new QPushButton("Reset Defaults");
+	ToolbarButtonsLayout->addWidget(ToolbarMoveUpButton);
+	ToolbarButtonsLayout->addWidget(ToolbarMoveDownButton);
+	ToolbarButtonsLayout->addWidget(ToolbarAddButton);
+	ToolbarButtonsLayout->addWidget(ToolbarEditButton);
+	ToolbarButtonsLayout->addWidget(ToolbarRemoveButton);
+	ToolbarButtonsLayout->addWidget(ToolbarResetButton);
+	ToolbarButtonsLayout->addStretch(1);
+	ToolbarDetailLayout->addLayout(ToolbarButtonsLayout);
+	ToolbarDetailLayout->addStretch(1);
+
+	auto RefreshToolbarRow = [&](int Index)
+	{
+		if (Index < 0 || Index >= ToolbarItems.count())
+			return;
+		QListWidgetItem* Row = ToolbarList->item(Index);
+		if (!Row)
+			return;
+		Row->setText(ToolbarItemText(ToolbarItems[Index]));
+		Row->setIcon(ToolbarItemIcon(ToolbarItems[Index]));
+		Row->setToolTip(ToolbarItems[Index].BuiltIn
+			? QString("Built-in toolbar action\n%1").arg(ToolbarItems[Index].BuiltInActionKey)
+			: QString("Custom toolbar item\n%1").arg(ToolbarItems[Index].FunctionScript.trimmed()));
+	};
+
+	auto RefreshToolbarList = [&]()
+	{
+		ToolbarUiUpdating = true;
+		const int SelectedRow = ToolbarList->currentRow();
+		ToolbarList->clear();
+		for (int ItemIdx = 0; ItemIdx < ToolbarItems.count(); ItemIdx++)
+		{
+			QListWidgetItem* Row = new QListWidgetItem(ToolbarItemIcon(ToolbarItems[ItemIdx]), ToolbarItemText(ToolbarItems[ItemIdx]), ToolbarList);
+			Row->setData(Qt::UserRole, ItemIdx);
+			Row->setToolTip(ToolbarItems[ItemIdx].BuiltIn
+				? QString("Built-in toolbar action\n%1").arg(ToolbarItems[ItemIdx].BuiltInActionKey)
+				: QString("Custom toolbar item\n%1").arg(ToolbarItems[ItemIdx].FunctionScript.trimmed()));
+		}
+		if (SelectedRow >= 0 && SelectedRow < ToolbarList->count())
+			ToolbarList->setCurrentRow(SelectedRow);
+		else if (ToolbarList->count() > 0)
+			ToolbarList->setCurrentRow(0);
+		ToolbarUiUpdating = false;
+	};
+
+	auto LoadToolbarSelection = [&]()
+	{
+		if (ToolbarUiUpdating)
+			return;
+		ToolbarSelectedIndex = ToolbarList->currentRow();
+		ToolbarUiUpdating = true;
+		if (ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count())
+		{
+			ToolbarNameValue->setText("-");
+			ToolbarFunctionValue->setText("-");
+			ToolbarIconEdit->clear();
+			ToolbarHiddenCheck->setChecked(false);
+			ToolbarEditButton->setEnabled(false);
+			ToolbarRemoveButton->setEnabled(false);
+			ToolbarMoveUpButton->setEnabled(false);
+			ToolbarMoveDownButton->setEnabled(false);
+		}
+		else
+		{
+			const ToolbarItemConfig& Item = ToolbarItems[ToolbarSelectedIndex];
+			ToolbarNameValue->setText(Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString("Custom Item")) : Item.Label);
+			ToolbarFunctionValue->setText(Item.BuiltIn
+				? QString("Built-in action: %1").arg(Item.BuiltInActionKey)
+				: (Item.FunctionScript.trimmed().isEmpty() ? QString("(no functionality yet)") : Item.FunctionScript.trimmed()));
+			ToolbarIconEdit->setText(Item.IconPath);
+			ToolbarHiddenCheck->setChecked(Item.Hidden);
+			ToolbarEditButton->setEnabled(!Item.BuiltIn);
+			ToolbarRemoveButton->setEnabled(!Item.BuiltIn);
+			ToolbarMoveUpButton->setEnabled(ToolbarSelectedIndex > 0);
+			ToolbarMoveDownButton->setEnabled(ToolbarSelectedIndex < ToolbarItems.count() - 1);
+		}
+		ToolbarIconEdit->setEnabled(ToolbarSelectedIndex >= 0);
+		ToolbarIconBrowse->setEnabled(ToolbarSelectedIndex >= 0);
+		ToolbarHiddenCheck->setEnabled(ToolbarSelectedIndex >= 0);
+		ToolbarUiUpdating = false;
+	};
+
+	auto CommitToolbarInlineEdits = [&]()
+	{
+		if (ToolbarUiUpdating || ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count())
+			return;
+		ToolbarItemConfig& Item = ToolbarItems[ToolbarSelectedIndex];
+		Item.IconPath = ToolbarIconEdit->text().trimmed();
+		Item.Hidden = ToolbarHiddenCheck->isChecked();
+		RefreshToolbarRow(ToolbarSelectedIndex);
+	};
+
+	auto EditToolbarItemDialog = [&](ToolbarItemConfig* Item, bool IsNew) -> bool
+	{
+		if (!Item)
+			return false;
+
+		QDialog ItemDialog(&Dialog, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+		ItemDialog.setWindowTitle(IsNew ? "Add Toolbar Item" : "Edit Toolbar Item");
+		ItemDialog.resize(760, 520);
+		QVBoxLayout* ItemLayout = new QVBoxLayout(&ItemDialog);
+		QFormLayout* FormLayout = new QFormLayout();
+		FormLayout->setLabelAlignment(Qt::AlignLeft);
+
+		QLineEdit* NameEdit = new QLineEdit(Item->Label, &ItemDialog);
+		BackgroundDropLineEdit* IconEdit = new BackgroundDropLineEdit(Item->IconPath, &ItemDialog);
+		QWidget* IconRow = new QWidget(&ItemDialog);
+		QHBoxLayout* IconRowLayout = new QHBoxLayout(IconRow);
+		IconRowLayout->setContentsMargins(0, 0, 0, 0);
+		IconRowLayout->addWidget(IconEdit, 1);
+		QPushButton* IconBrowse = new QPushButton("Browse...", IconRow);
+		IconRowLayout->addWidget(IconBrowse);
+
+		QPlainTextEdit* FunctionEdit = new QPlainTextEdit(Item->FunctionScript, &ItemDialog);
+		FunctionEdit->setPlaceholderText("One command per line. Supported forms: builtin:<action>, exe:\"path\" [args], url:<url>, file:<path>, folder:<path>.");
+		FunctionEdit->setMinimumHeight(240);
+
+		FormLayout->addRow("Name:", NameEdit);
+		FormLayout->addRow("Icon:", IconRow);
+		FormLayout->addRow("Functionality:", FunctionEdit);
+		ItemLayout->addLayout(FormLayout, 1);
+
+		QHBoxLayout* QuickAddLayout = new QHBoxLayout();
+		QToolButton* AddBuiltinButton = new QToolButton(&ItemDialog);
+		AddBuiltinButton->setText("Add Built-in");
+		AddBuiltinButton->setPopupMode(QToolButton::InstantPopup);
+		QMenu* BuiltInMenu = new QMenu(AddBuiltinButton);
+		for (const ToolbarBuiltinSpec& Spec : kToolbarBuiltinSpecs)
+		{
+			QAction* AddAction = BuiltInMenu->addAction(QString::fromLatin1(Spec.Label));
+			connect(AddAction, &QAction::triggered, &ItemDialog, [FunctionEdit, Spec]()
+			{
+				if (!FunctionEdit->toPlainText().trimmed().isEmpty())
+					FunctionEdit->appendPlainText(QString());
+				FunctionEdit->appendPlainText(QString("builtin:%1").arg(QString::fromLatin1(Spec.Key)));
+			});
+		}
+		AddBuiltinButton->setMenu(BuiltInMenu);
+		QuickAddLayout->addWidget(AddBuiltinButton);
+
+		QPushButton* AddExecutableButton = new QPushButton("Add Executable", &ItemDialog);
+		QuickAddLayout->addWidget(AddExecutableButton);
+		QPushButton* AddUrlButton = new QPushButton("Add URL", &ItemDialog);
+		QuickAddLayout->addWidget(AddUrlButton);
+		QPushButton* AddFolderButton = new QPushButton("Add Folder", &ItemDialog);
+		QuickAddLayout->addWidget(AddFolderButton);
+		QuickAddLayout->addStretch(1);
+		ItemLayout->addLayout(QuickAddLayout);
+
+		auto AppendScriptLine = [&](const QString& Line)
+		{
+			if (Line.trimmed().isEmpty())
+				return;
+			if (!FunctionEdit->toPlainText().trimmed().isEmpty())
+				FunctionEdit->appendPlainText(QString());
+			FunctionEdit->appendPlainText(Line);
+		};
+
+		connect(IconBrowse, &QPushButton::clicked, &ItemDialog, [&, IconEdit]()
+		{
+			const QString FileName = QFileDialog::getOpenFileName(&ItemDialog, "Select Icon", QString(), "Images (*.png *.jpg *.jpeg *.bmp *.webp *.ico);;All Files (*)");
+			if (!FileName.isEmpty())
+				IconEdit->setText(FileName);
+		});
+		connect(AddExecutableButton, &QPushButton::clicked, &ItemDialog, [&, FunctionEdit]()
+		{
+			const QString FileName = QFileDialog::getOpenFileName(&ItemDialog, "Select Executable", QString(), "Executables (*.exe);;All Files (*)");
+			if (!FileName.isEmpty())
+				AppendScriptLine(QString("exe:\"%1\"").arg(QDir::toNativeSeparators(FileName)));
+		});
+		connect(AddUrlButton, &QPushButton::clicked, &ItemDialog, [&, FunctionEdit]()
+		{
+			bool Accepted = false;
+			const QString UrlText = QInputDialog::getText(&ItemDialog, "Add URL", "URL:", QLineEdit::Normal, QString(), &Accepted).trimmed();
+			if (Accepted && !UrlText.isEmpty())
+				AppendScriptLine(QString("url:%1").arg(UrlText));
+		});
+		connect(AddFolderButton, &QPushButton::clicked, &ItemDialog, [&, FunctionEdit]()
+		{
+			const QString FolderPath = QFileDialog::getExistingDirectory(&ItemDialog, "Select Folder", QString(), QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+			if (!FolderPath.isEmpty())
+				AppendScriptLine(QString("folder:%1").arg(QDir::toNativeSeparators(FolderPath)));
+		});
+
+		QDialogButtonBox* Buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &ItemDialog);
+		ItemLayout->addWidget(Buttons);
+		connect(Buttons, SIGNAL(accepted()), &ItemDialog, SLOT(accept()));
+		connect(Buttons, SIGNAL(rejected()), &ItemDialog, SLOT(reject()));
+
+		if (ItemDialog.exec() != QDialog::Accepted)
+			return false;
+
+		Item->Label = NameEdit->text().trimmed();
+		Item->IconPath = IconEdit->text().trimmed();
+		Item->FunctionScript = FunctionEdit->toPlainText().trimmed();
+		Item->BuiltIn = false;
+		Item->BuiltInActionKey.clear();
+		if (Item->Key.trimmed().isEmpty())
+			Item->Key = QString("custom-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+		return true;
+	};
+
+	auto RebuildToolbarPage = [&]()
+	{
+		RefreshToolbarList();
+		LoadToolbarSelection();
+	};
+
+	connect(ToolbarList, &QListWidget::currentRowChanged, &Dialog, [=](int)
+	{
+		LoadToolbarSelection();
+	});
+	connect(ToolbarIconEdit, &QLineEdit::textChanged, &Dialog, [=](const QString&)
+	{
+		CommitToolbarInlineEdits();
+	});
+	connect(ToolbarHiddenCheck, &QCheckBox::toggled, &Dialog, [=](bool)
+	{
+		CommitToolbarInlineEdits();
+	});
+	connect(ToolbarIconBrowse, &QPushButton::clicked, &Dialog, [=, &Dialog]()
+	{
+		const QString FileName = QFileDialog::getOpenFileName(&Dialog, "Select Icon", QString(), "Images (*.png *.jpg *.jpeg *.bmp *.webp *.ico);;All Files (*)");
+		if (!FileName.isEmpty())
+			ToolbarIconEdit->setText(FileName);
+	});
+	connect(ToolbarAddButton, &QPushButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		ToolbarItemConfig NewItem;
+		NewItem.Key = QString("custom-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+		NewItem.Label = "Custom Item";
+		NewItem.BuiltIn = false;
+		NewItem.Hidden = false;
+		if (!EditToolbarItemDialog(&NewItem, true))
+			return;
+		ToolbarItems.append(NewItem);
+		RefreshToolbarList();
+		ToolbarList->setCurrentRow(ToolbarItems.count() - 1);
+	});
+	connect(ToolbarEditButton, &QPushButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		if (ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count() || ToolbarItems[ToolbarSelectedIndex].BuiltIn)
+			return;
+		if (!EditToolbarItemDialog(&ToolbarItems[ToolbarSelectedIndex], false))
+			return;
+		RefreshToolbarList();
+		ToolbarList->setCurrentRow(ToolbarSelectedIndex);
+	});
+	connect(ToolbarRemoveButton, &QPushButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		if (ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count() || ToolbarItems[ToolbarSelectedIndex].BuiltIn)
+			return;
+		if (QMessageBox::question(&Dialog, "Remove Toolbar Item", QString("Remove '%1'?" ).arg(ToolbarItems[ToolbarSelectedIndex].Label)) != QMessageBox::Yes)
+			return;
+		ToolbarItems.removeAt(ToolbarSelectedIndex);
+		RefreshToolbarList();
+		ToolbarList->setCurrentRow(qMin(ToolbarSelectedIndex, ToolbarItems.count() - 1));
+	});
+	connect(ToolbarResetButton, &QPushButton::clicked, &Dialog, [&]()
+	{
+		if (QMessageBox::question(&Dialog, "Reset Toolbar", "Restore the default toolbar layout and remove custom items?") != QMessageBox::Yes)
+			return;
+		ToolbarItems = DefaultToolbarItems();
+		RefreshToolbarList();
+	});
+	connect(ToolbarMoveUpButton, &QPushButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		if (ToolbarSelectedIndex <= 0 || ToolbarSelectedIndex >= ToolbarItems.count())
+			return;
+		qSwap(ToolbarItems[ToolbarSelectedIndex - 1], ToolbarItems[ToolbarSelectedIndex]);
+		RefreshToolbarList();
+		ToolbarList->setCurrentRow(ToolbarSelectedIndex - 1);
+	});
+	connect(ToolbarMoveDownButton, &QPushButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		if (ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count() - 1)
+			return;
+		qSwap(ToolbarItems[ToolbarSelectedIndex], ToolbarItems[ToolbarSelectedIndex + 1]);
+		RefreshToolbarList();
+		ToolbarList->setCurrentRow(ToolbarSelectedIndex + 1);
+	});
+
+	RefreshToolbarList();
+	LoadToolbarSelection();
+	AddSettingsPage("Toolbar", style()->standardIcon(QStyle::SP_TitleBarMenuButton), ToolbarTab);
 
 	QWidget* ThemesTab = new QWidget(&Dialog);
 	QVBoxLayout* ThemesLayout = new QVBoxLayout(ThemesTab);
@@ -5131,6 +8875,10 @@ void mlMainWindow::OnEditOptions()
 	ShowItemTypeTags->setChecked(Settings.value("ShowItemTypeTags", true).toBool());
 	ShowItemTypeTags->setToolTip("Show the small Map/Mod label next to each main item name.");
 	ThemesLayout->addWidget(ShowItemTypeTags);
+	QCheckBox* UseLegacyToolbarIcons = new QCheckBox("Use legacy toolbar icons");
+	UseLegacyToolbarIcons->setChecked(Settings.value("UseLegacyToolbarIcons", false).toBool());
+	UseLegacyToolbarIcons->setToolTip("Switch the toolbar back to the older icon set instead of the new artwork.");
+	ThemesLayout->addWidget(UseLegacyToolbarIcons);
 
 	QHBoxLayout* AssetBackgroundLayout = new QHBoxLayout();
 	AssetBackgroundLayout->addWidget(new QLabel("List Background:"));
@@ -5363,6 +9111,234 @@ void mlMainWindow::OnEditOptions()
 
 	ConsoleLayout->addStretch(1);
 	AddSettingsPage("Console", style()->standardIcon(QStyle::SP_MessageBoxInformation), ConsoleTab);
+
+	UpdateStatsTimers();
+	FlushCurrentItemTime();
+	SetCurrentStatsItem(mFileListWidget ? mFileListWidget->currentItem() : NULL);
+
+	QWidget* StatsTab = new QWidget(&Dialog);
+	QVBoxLayout* StatsLayout = new QVBoxLayout(StatsTab);
+	StatsLayout->setContentsMargins(14, 14, 14, 14);
+	StatsLayout->setSpacing(12);
+	QHBoxLayout* StatsHeaderLayout = new QHBoxLayout();
+	StatsHeaderLayout->setContentsMargins(0, 0, 0, 0);
+	StatsHeaderLayout->setSpacing(12);
+	StatsHeaderLayout->addWidget(new QLabel("My Stats"));
+	StatsHeaderLayout->addStretch(1);
+	QLabel* CurrentOpenTimeLabel = new QLabel(StatsTab);
+	CurrentOpenTimeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	CurrentOpenTimeLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	StatsHeaderLayout->addWidget(CurrentOpenTimeLabel);
+	auto RefreshCurrentOpenTimeLabel = [this, CurrentOpenTimeLabel]()
+	{
+		const qint64 CurrentSeconds = mStatsElapsedTimer.isValid() ? qMax<qint64>(0, mStatsElapsedTimer.elapsed() / 1000) : 0;
+		CurrentOpenTimeLabel->setText(QString("Current open time: %1").arg(FormatDuration(CurrentSeconds)));
+	};
+	RefreshCurrentOpenTimeLabel();
+	QTimer* StatsOpenTimer = new QTimer(&Dialog);
+	StatsOpenTimer->setInterval(1000);
+	connect(StatsOpenTimer, &QTimer::timeout, &Dialog, [=]() { RefreshCurrentOpenTimeLabel(); });
+	StatsOpenTimer->start();
+	StatsLayout->addLayout(StatsHeaderLayout);
+	QLabel* StatsIntro = new QLabel("These stats are tracked locally on this PC while you use the launcher.");
+	StatsIntro->setWordWrap(true);
+	StatsLayout->addWidget(StatsIntro);
+
+	QGridLayout* StatsGrid = new QGridLayout();
+	StatsGrid->setHorizontalSpacing(18);
+	StatsGrid->setVerticalSpacing(8);
+	auto AddStatRow = [&](int Row, const QString& Label, const QString& Value)
+	{
+		QLabel* LabelWidget = new QLabel(Label, StatsTab);
+		QLabel* ValueWidget = new QLabel(Value, StatsTab);
+		if (Row >= 15)
+		{
+			LabelWidget->setStyleSheet("color:#666666;");
+			ValueWidget->setStyleSheet("color:#666666;");
+		}
+		ValueWidget->setTextInteractionFlags(Qt::TextSelectableByMouse);
+		StatsGrid->addWidget(LabelWidget, Row, 0);
+		StatsGrid->addWidget(ValueWidget, Row, 1);
+	};
+	auto HasPublishedWorkshopId = [&](bool IsMap, const QString& Name) -> bool
+	{
+		const QString WorkshopJsonPath = IsMap
+			? QDir::cleanPath(QString("%1/usermaps/%2/zone/workshop.json").arg(mGamePath, Name))
+			: QDir::cleanPath(QString("%1/mods/%2/zone/workshop.json").arg(mGamePath, Name));
+		QFile WorkshopFile(WorkshopJsonPath);
+		if (!WorkshopFile.open(QIODevice::ReadOnly))
+			return false;
+
+		const QJsonObject Root = QJsonDocument::fromJson(WorkshopFile.readAll()).object();
+		const QString PublisherId = Root.value("PublisherID").toString().trimmed();
+		return !PublisherId.isEmpty() && PublisherId != "0";
+	};
+	int CurrentMapCount = 0;
+	int PublishedMapCount = 0;
+	const QString UserMapsFolder = QDir::cleanPath(QString("%1/usermaps").arg(mGamePath));
+	const QStringList UserMapFolders = QDir(UserMapsFolder).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
+	for (const QString& MapName : UserMapFolders)
+	{
+		const QString ZoneFileName = QDir::cleanPath(QString("%1/%2/zone_source/%2.zone").arg(UserMapsFolder, MapName));
+		if (!QFileInfo(ZoneFileName).isFile())
+			continue;
+
+		CurrentMapCount++;
+		if (HasPublishedWorkshopId(true, MapName))
+			PublishedMapCount++;
+	}
+
+	int CurrentModCount = 0;
+	int PublishedModCount = 0;
+	const QString ModsFolder = QDir::cleanPath(QString("%1/mods").arg(mGamePath));
+	const QStringList ModFolders = QDir(ModsFolder).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
+	for (const QString& ModName : ModFolders)
+	{
+		bool HasZone = false;
+		const char* ZoneNames[4] = { "core_mod", "mp_mod", "cp_mod", "zm_mod" };
+		for (int ZoneIdx = 0; ZoneIdx < 4; ZoneIdx++)
+		{
+			const QString ZoneFileName = QDir::cleanPath(QString("%1/%2/zone_source/%3.zone").arg(ModsFolder, ModName, ZoneNames[ZoneIdx]));
+			if (QFileInfo(ZoneFileName).isFile())
+			{
+				HasZone = true;
+				break;
+			}
+		}
+
+		if (!HasZone)
+			continue;
+
+		CurrentModCount++;
+		if (HasPublishedWorkshopId(false, ModName))
+			PublishedModCount++;
+	}
+	AddStatRow(0, "Launcher sessions:", QString::number(StatValue("Stats/SessionCount")));
+	AddStatRow(1, "Total time wasted:", FormatDuration(StatValue("Stats/TotalOpenSeconds")));
+	AddStatRow(2, "Total active time:", FormatDuration(StatValue("Stats/TotalActiveSeconds")));
+	AddStatRow(3, "Total idle time:", FormatDuration(StatValue("Stats/TotalIdleSeconds")));
+	AddStatRow(4, "Total compiles:", QString::number(StatValue("Stats/TotalCompiles")));
+	AddStatRow(5, "Total compile time:", FormatDuration(StatValue("Stats/TotalCompileSeconds")));
+	AddStatRow(6, "Total links:", QString::number(StatValue("Stats/TotalLinks")));
+	AddStatRow(7, "Total link time:", FormatDuration(StatValue("Stats/TotalLinkSeconds")));
+	AddStatRow(8, "Total lights:", QString::number(StatValue("Stats/TotalLights")));
+	AddStatRow(9, "Total light time:", FormatDuration(StatValue("Stats/TotalLightSeconds")));
+	AddStatRow(10, "Launcher runs:", QString::number(StatValue("Stats/TotalLauncherRuns")));
+	AddStatRow(11, "Total plays:", QString::number(StatValue("Stats/TotalGameLaunches")));
+	AddStatRow(12, "Total time in game:", FormatDuration(StatValue("Stats/TotalGameSeconds")));
+	AddStatRow(13, "Radiant launches:", QString::number(StatValue("Stats/RadiantLaunches")));
+	AddStatRow(14, "Time in Radiant:", FormatDuration(StatValue("Stats/RadiantSeconds")));
+	AddStatRow(15, "Asset Editor launches:", QString::number(StatValue("Stats/AssetEditorLaunches")));
+	AddStatRow(16, "Time in Asset Editor:", FormatDuration(StatValue("Stats/AssetEditorSeconds")));
+	AddStatRow(17, "Current maps:", QString::number(CurrentMapCount));
+	AddStatRow(18, "Current mods:", QString::number(CurrentModCount));
+	AddStatRow(19, "Workshop publishes:", QString::number(StatValue("Stats/TotalWorkshopPublishes")));
+	AddStatRow(20, "Published items:", QString::number(PublishedMapCount + PublishedModCount));
+	AddStatRow(21, "Published maps:", QString::number(PublishedMapCount));
+	AddStatRow(22, "Published mods:", QString::number(PublishedModCount));
+	StatsLayout->addLayout(StatsGrid);
+
+	QFrame* StatsDivider = new QFrame();
+	StatsDivider->setFrameShape(QFrame::HLine);
+	StatsLayout->addWidget(StatsDivider);
+	StatsLayout->addWidget(new QLabel("Per Map / Mod Time"));
+	QTreeWidget* StatsItemsTree = new QTreeWidget(StatsTab);
+	StatsItemsTree->setColumnCount(8);
+	StatsItemsTree->setHeaderLabels(QStringList() << "Item" << "Type" << "Time Wasted" << "In-Game" << "Plays" << "Radiant Time" << "Publishes" << "Published");
+	StatsItemsTree->setRootIsDecorated(false);
+	StatsItemsTree->setAlternatingRowColors(false);
+	StatsItemsTree->setUniformRowHeights(true);
+	QSettings StatsSettings;
+	QHash<QString, qint64> LauncherSecondsByItem;
+	QHash<QString, qint64> GameSecondsByItem;
+	QHash<QString, qint64> PlayCountByItem;
+	QHash<QString, qint64> RadiantSecondsByItem;
+	QHash<QString, qint64> PublishCountByItem;
+	StatsSettings.beginGroup("Stats");
+	StatsSettings.beginGroup("Items");
+	const QStringList ItemGroups = StatsSettings.childGroups();
+	for (const QString& ItemKey : ItemGroups)
+	{
+		StatsSettings.beginGroup(ItemKey);
+		const qint64 LauncherSeconds = StatsSettings.value("LauncherSeconds", 0).toLongLong();
+		StatsSettings.endGroup();
+		LauncherSecondsByItem[NormalizeStatsItemKey(ItemKey)] += LauncherSeconds;
+	}
+	StatsSettings.endGroup();
+	StatsSettings.beginGroup("ItemsGameSeconds");
+	const QStringList GameKeys = StatsSettings.childKeys();
+	for (const QString& ItemKey : GameKeys)
+		GameSecondsByItem[NormalizeStatsItemKey(ItemKey)] += StatsSettings.value(ItemKey, 0).toLongLong();
+	StatsSettings.endGroup();
+	StatsSettings.beginGroup("ItemsPlayCount");
+	const QStringList PlayKeys = StatsSettings.childKeys();
+	for (const QString& ItemKey : PlayKeys)
+		PlayCountByItem[NormalizeStatsItemKey(ItemKey)] += StatsSettings.value(ItemKey, 0).toLongLong();
+	StatsSettings.endGroup();
+	StatsSettings.beginGroup("ItemsRadiantSeconds");
+	const QStringList RadiantKeys = StatsSettings.childKeys();
+	for (const QString& ItemKey : RadiantKeys)
+		RadiantSecondsByItem[NormalizeStatsItemKey(ItemKey)] += StatsSettings.value(ItemKey, 0).toLongLong();
+	StatsSettings.endGroup();
+	StatsSettings.beginGroup("ItemsPublishCount");
+	const QStringList PublishKeys = StatsSettings.childKeys();
+	for (const QString& ItemKey : PublishKeys)
+		PublishCountByItem[NormalizeStatsItemKey(ItemKey)] += StatsSettings.value(ItemKey, 0).toLongLong();
+	StatsSettings.endGroup();
+	StatsSettings.endGroup();
+	QSet<QString> AllItemKeys;
+	for (auto It = LauncherSecondsByItem.constBegin(); It != LauncherSecondsByItem.constEnd(); ++It)
+		AllItemKeys.insert(It.key());
+	for (auto It = GameSecondsByItem.constBegin(); It != GameSecondsByItem.constEnd(); ++It)
+		AllItemKeys.insert(It.key());
+	for (auto It = PlayCountByItem.constBegin(); It != PlayCountByItem.constEnd(); ++It)
+		AllItemKeys.insert(It.key());
+	for (auto It = RadiantSecondsByItem.constBegin(); It != RadiantSecondsByItem.constEnd(); ++It)
+		AllItemKeys.insert(It.key());
+	for (auto It = PublishCountByItem.constBegin(); It != PublishCountByItem.constEnd(); ++It)
+		AllItemKeys.insert(It.key());
+	QString FavoriteModLabel = "-";
+	qint64 FavoriteModScore = -1;
+	for (const QString& ItemKey : AllItemKeys)
+	{
+		const qint64 LauncherSeconds = LauncherSecondsByItem.value(ItemKey);
+		const qint64 GameSeconds = GameSecondsByItem.value(ItemKey);
+		const qint64 PlayCount = PlayCountByItem.value(ItemKey);
+		const qint64 RadiantSeconds = RadiantSecondsByItem.value(ItemKey);
+		const qint64 PublishCount = PublishCountByItem.value(ItemKey);
+		if (LauncherSeconds <= 0 && GameSeconds <= 0 && PlayCount <= 0 && RadiantSeconds <= 0 && PublishCount <= 0)
+			continue;
+
+		const bool IsMap = ItemKey.startsWith("map:");
+		const bool IsMod = ItemKey.startsWith("mod:");
+		const QString InternalName = IsMap ? ItemKey.mid(4) : (IsMod ? ItemKey.mid(4) : ItemKey);
+		const bool IsPublished = IsMap ? HasPublishedWorkshopId(true, InternalName) : (IsMod ? HasPublishedWorkshopId(false, InternalName) : false);
+		if (IsMod)
+		{
+			const qint64 FavoriteScore = qMax(GameSeconds, LauncherSeconds);
+			if (FavoriteScore > FavoriteModScore)
+			{
+				FavoriteModScore = FavoriteScore;
+				FavoriteModLabel = DisplayNameForStatsKey(ItemKey);
+			}
+		}
+
+		QTreeWidgetItem* Item = new QTreeWidgetItem(StatsItemsTree);
+		Item->setText(0, DisplayNameForStatsKey(ItemKey));
+		Item->setText(1, IsMap ? "Map" : (IsMod ? "Mod" : "Item"));
+		Item->setText(2, FormatDuration(LauncherSeconds));
+		Item->setText(3, FormatDuration(GameSeconds));
+		Item->setText(4, QString::number(PlayCount));
+		Item->setText(5, FormatDuration(RadiantSeconds));
+		Item->setText(6, QString::number(PublishCount));
+		Item->setText(7, IsMap || IsMod ? (IsPublished ? "Yes" : "No") : "-");
+		Item->setData(0, Qt::UserRole, LauncherSeconds + GameSeconds + RadiantSeconds);
+	}
+	StatsItemsTree->sortItems(0, Qt::AscendingOrder);
+	StatsLayout->addWidget(StatsItemsTree, 1);
+	AddStatRow(23, "Favorite mod:", FavoriteModLabel);
+	AddSettingsPage("My Stats", style()->standardIcon(QStyle::SP_FileDialogInfoView), StatsTab);
+
 	connect(SettingsNavList, &QListWidget::currentRowChanged, SettingsPages, &QStackedWidget::setCurrentIndex);
 	SettingsNavList->setCurrentRow(0);
 
@@ -5450,6 +9426,7 @@ void mlMainWindow::OnEditOptions()
 		Values.insert("ThemeMode", ThemeModeToSettingsValue(BaseThemeCombo->currentData().toInt()));
 		Values.insert("AccentColor", AccentColorEdit->text().trimmed());
 		Values.insert("ShowItemTypeTags", ShowItemTypeTags->isChecked());
+		Values.insert("UseLegacyToolbarIcons", UseLegacyToolbarIcons->isChecked());
 		Values.insert("CustomStylesheet", CustomCssEdit->toPlainText());
 		Values.insert("ConsoleStyle", ImprovedConsoleStyle->isChecked() ? "improved" : "original");
 		Values.insert("AssetTreeBackgroundImage", AssetBackgroundEdit->text().trimmed());
@@ -5487,6 +9464,7 @@ void mlMainWindow::OnEditOptions()
 		BaseThemeCombo->setCurrentIndex(qMax(0, BaseThemeCombo->findData(ThemeModeValueFromTheme)));
 		AccentColorEdit->setText(Values.value("AccentColor", "#ff8a2a").toString());
 		ShowItemTypeTags->setChecked(Values.value("ShowItemTypeTags", true).toBool());
+		UseLegacyToolbarIcons->setChecked(Values.value("UseLegacyToolbarIcons", false).toBool());
 		CustomCssEdit->setPlainText(Values.value("CustomStylesheet", "").toString());
 		if (Values.value("ConsoleStyle", "improved").toString() == "original")
 			OriginalConsoleStyle->setChecked(true);
@@ -5621,9 +9599,27 @@ void mlMainWindow::OnEditOptions()
 	Settings.setValue("BuildLanguage", mBuildLanguage);
 	Settings.setValue("ShowRecents", ShowRecentsCheckbox->isChecked());
 	Settings.setValue("ShowFavorites", ShowFavoritesCheckbox->isChecked());
+	Settings.setValue("ShowStartupQuote", ShowStartupQuoteCheckbox->isChecked());
+	SaveToolbarItems(ToolbarItems);
 	SaveThemeProfile(SelectedThemeProfileId, ThemeProfileDisplayName(SelectedThemeProfileId), SelectedThemeValues);
 	ApplyThemeProfile(SelectedThemeProfileId);
+	if (mStartupQuoteLabel)
+	{
+		if (ShowStartupQuoteCheckbox->isChecked())
+		{
+			mStartupQuoteText = RandomStartupQuote();
+			mStartupQuoteLabel->setText(mStartupQuoteText);
+			mStartupQuoteLabel->show();
+		}
+		else
+		{
+			mStartupQuoteText.clear();
+			mStartupQuoteLabel->clear();
+			mStartupQuoteLabel->hide();
+		}
+	}
 
+	CreateToolBar();
 	ApplyLauncherLayout();
 	UpdateTheme();
 	PopulateFileList();
@@ -5631,6 +9627,7 @@ void mlMainWindow::OnEditOptions()
 
 void mlMainWindow::UpdateTheme()
 {
+	AppendStartupTrace("UpdateTheme:start");
 	QSettings Settings;
 	mThemeProfileId = CurrentThemeProfileId();
 	QString AccentColor = Settings.value("AccentColor", "#ff8a2a").toString().trimmed();
@@ -5653,6 +9650,24 @@ void mlMainWindow::UpdateTheme()
 	const bool UseUpdatedChrome = ThemeUsesUpdatedChrome(mThemeMode);
 	const bool UseDarkModernChrome = ThemeUsesDarkModernChrome(mThemeMode);
 	setProperty("themeProfile", mThemeProfileId);
+	if (mActionFileNew)
+		mActionFileNew->setIcon(ToolbarIconForActionKey("file-new"));
+	if (mActionFileAssetEditor)
+		mActionFileAssetEditor->setIcon(ToolbarIconForActionKey("file-asset-editor"));
+	if (mActionFileLevelEditor)
+		mActionFileLevelEditor->setIcon(ToolbarIconForActionKey("file-level-editor"));
+	if (mActionFileExport2Bin)
+		mActionFileExport2Bin->setIcon(ToolbarIconForActionKey("file-export2bin"));
+	if (mActionFileOpenScriptReference)
+		mActionFileOpenScriptReference->setIcon(ToolbarIconForActionKey("help-script-reference"));
+	if (mActionEditBuild)
+		mActionEditBuild->setIcon(ToolbarIconForActionKey("edit-build"));
+	if (mActionEditAnalyze)
+		mActionEditAnalyze->setIcon(ToolbarIconForActionKey("edit-analyze"));
+	if (mActionEditReadyForPublish)
+		mActionEditReadyForPublish->setIcon(ToolbarIconForActionKey("edit-ready-for-publish"));
+	if (mActionEditPublish)
+		mActionEditPublish->setIcon(ToolbarIconForActionKey("edit-publish"));
 	UpdateOutputConsoleMode();
 	if (mLogFiltersButton)
 		mLogFiltersButton->setVisible(ImprovedConsole);
@@ -5661,8 +9676,8 @@ void mlMainWindow::UpdateTheme()
 
 	if (UseClassicChrome)
 	{
-		const QString ClassicConsoleBackground = QApplication::palette().color(QPalette::Base).name(QColor::HexRgb);
 		qApp->setStyle("Windows");
+		const QString ClassicConsoleBackground = QApplication::palette().color(QPalette::Base).name(QColor::HexRgb);
 		QFile file(QString("%1/radiant/stylesheet.qss").arg(mToolsPath));
 		file.open(QFile::ReadOnly);
 		QString styleSheet = QLatin1String(file.readAll());
@@ -5673,7 +9688,8 @@ void mlMainWindow::UpdateTheme()
 				"#ItemRowWidget { background: transparent; }"
 				"#AssetTree { margin-top: 0; padding: 0; background: #5a5a5a; }"
 				"#AssetTree::viewport { background: #5a5a5a; }"
-				"#OutputConsole, #OutputConsolePlain { background: %1; }"
+				"#OutputConsole, #OutputConsoleViewport, #OutputConsolePlain, #OutputConsolePlainViewport { background: %1; border: 0; outline: 0; }"
+				"#OutputConsole:focus, #OutputConsolePlain:focus, #OutputConsoleViewport:focus, #OutputConsolePlainViewport:focus { border: 0; outline: 0; }"
 				"#AssetTree::item { min-height: 16px; padding: 0; margin: 0; color: transparent; }"
 			"#AssetTree::item:hover { color: transparent; }"
 			"#AssetTree::item:selected { color: transparent; }"
@@ -5682,25 +9698,37 @@ void mlMainWindow::UpdateTheme()
 			"#OutputConsole::branch { width: 0px; background: transparent; }"
 				"#ItemTitleWidget, #QuickActionStrip, #ItemInternalNameLabel, #ItemTypeTag { background: transparent; border: 0; }"
 				"#ItemTitleWidget[childRow=\"true\"], #QuickActionStrip[childRow=\"true\"], #ItemTitleWidget[hovered=\"true\"], #QuickActionStrip[hovered=\"true\"] { background: transparent; }"
-				"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #b1b1b1; font-weight: 400; }"
+				"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #e9e9e9; font-weight: 400; }"
 				"#ItemInternalNameLabel, #ItemTypeTag { color: #9a9a9a; padding: 0; margin-left: 2px; }"
-				"#QuickLaunchCombo { min-height: 28px; max-height: 28px; padding: 2px 28px 2px 8px; }"
+				"#QuickLaunchCombo { min-height: 34px; max-height: 34px; }"
+				"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 3px 8px; text-align: left; background: #5f5f5f; border: 1px solid #7a7a7a; border-radius: 6px; color: #d8d8d8; }"
+				"#QuickLaunchPopup { background: #3d3d3d; border: 1px solid #7a7a7a; }"
+				"#QuickLaunchSearch { min-height: 24px; padding: 4px 8px; background: #5f5f5f; border: 1px solid #7a7a7a; color: #e4e4e4; }"
+				"#QuickLaunchTabs::tab { padding: 4px 8px; margin-right: 2px; background: #555555; border: 1px solid #767676; color: #d6d6d6; }"
+				"#QuickLaunchTabs::tab:selected { background: #707070; color: #111111; }"
+				"#QuickLaunchList { border: 1px solid #7a7a7a; background: #4a4a4a; color: #e4e4e4; padding: 2px; }"
+				"#QuickLaunchList::item { padding: 2px 6px; border: 1px solid transparent; margin: 0; }"
+				"#QuickLaunchList::item:selected { background: #8a8a8a; color: #111111; border-color: #9a9a9a; }"
 				"#ItemSelectCheckBox { spacing: 0; padding: 0; margin: 0; }"
 				"QCheckBox::indicator { width: 12px; height: 12px; border-radius: 1px; border: 1px solid #7a7a7a; background: #5f5f5f; }"
 				"#ItemSelectCheckBox::indicator { width: 12px; height: 12px; margin: 0; border-radius: 1px; border: 1px solid #808080; background: #666666; }"
-				"#QuickActionStrip { min-height: 22px; }"
-				"#QuickActionButton { min-height: 18px; padding: 0 4px; }"
-				"#QuickMiniActionButton { background: transparent; border: 0; padding: 0; min-height: 22px; color: #b1b1b1; }"
-				"#DisplayNameAddButton { min-height: 18px; padding: 0; }"
-			"#LogFiltersButton { background: transparent; border: 0; padding: 0 8px; min-height: 18px; color: #d8d8d8; font-size: 11px; }"
-			"#BackgroundPreview { border: 1px solid #5a5a5a; background: #2a2a2a; color: #cfcfcf; }"
-			"#GameStateLabel { color: #7a7a7a; padding-left: 2px; }"
-			"#FooterStatusLabel { color: #d8d8d8; padding: 4px 8px; font-weight: 600; }")
+					"#QuickActionStrip { min-height: 22px; }"
+					"#QuickActionButton { min-height: 18px; padding: 0 4px; }"
+					"#QuickMiniActionButton { background: transparent; border: 0; padding: 0; min-height: 22px; color: #b1b1b1; }"
+					"#DisplayNameAddButton { min-height: 18px; padding: 0; }"
+				"#OutputTabs { background: transparent; }"
+				"#OutputTabs::tab { padding: 4px 8px; margin: 4px 2px 0 0; min-width: 44px; font-size: 11px; }"
+				"#LogFiltersButton { background: transparent; border: 0; padding: 0 8px; min-height: 18px; color: #d8d8d8; font-size: 11px; }"
+				"#BackgroundPreview { border: 1px solid #5a5a5a; background: #2a2a2a; color: #cfcfcf; }"
+				"#GameStateLabel { color: #7a7a7a; padding-left: 2px; }"
+				"#FooterStatusLabel { color: #d8d8d8; padding: 4px 8px; font-weight: 600; }"
+				"#FooterRefreshButton { padding: 2px 4px; }"
+				"#FooterDownloadButton { min-height: 18px; padding: 3px 8px; }")
 			.arg(ClassicConsoleBackground)
 			+ QString("#OutputConsole, #OutputConsolePlain { color: %1; }").arg(DefaultLogColor)
 			+ "#ItemNameButton:hover { background: transparent; color: #111111; }"
 			+ "#ItemTitleWidget[hovered=\"true\"] #ItemNameButton, #ItemTitleWidget[hovered=\"true\"] #ItemInternalNameLabel, #ItemTitleWidget[hovered=\"true\"] #ItemTypeTag { color: #111111; }"
-			+ "#ItemTitleWidget[selected=\"true\"] #ItemNameButton, #ItemTitleWidget[selected=\"true\"] #ItemInternalNameLabel, #ItemTitleWidget[selected=\"true\"] #ItemTypeTag { color: #111111; }"
+			+ "#ItemTitleWidget[selected=\"true\"] #ItemNameButton, #ItemTitleWidget[selected=\"true\"] #ItemInternalNameLabel, #ItemTitleWidget[selected=\"true\"] #ItemTypeTag { color: #000000; }"
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverLight)
 			+ QString("#QuickMiniActionButton:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
 			+ "#WorkshopVersionsList { border: 1px solid #5a5a5a; background: #262626; outline: 0; }"
@@ -5728,16 +9756,18 @@ void mlMainWindow::UpdateTheme()
 					"#SettingsNavList { background: #232323; border: 1px solid #3a3a3a; padding: 4px; }"
 			"#SettingsNavList::item { padding: 10px 12px; border-radius: 6px; }"
 			"#SettingsNavList::item:selected { background: #3b3b3b; color: #f0f0f0; }"
-			"#CategoryTabs { background: transparent; }"
-			"#CategoryTabs::tab { background: #2f2f2f; border: 1px solid #1e1e1e; border-bottom: 0; padding: 8px 14px; margin: 6px 3px 0 0; min-width: 70px; border-top-left-radius: 8px; border-top-right-radius: 8px; }"
-					"#AssetTree { margin-top: 0; border-top-left-radius: 0; padding: 0; background: #4f4f4f; }"
+				"#CategoryTabs { background: transparent; }"
+					"#CategoryTabs::tab { background: #3a3a3a; color: #f0f0f0; border: 1px solid #2a2a2a; border-bottom: 0; padding: 8px 14px; margin: 6px 3px 0 0; min-width: 70px; border-top-left-radius: 8px; border-top-right-radius: 8px; }"
+				"#OutputTabs { background: transparent; }"
+				"#OutputTabs::tab { background: #2b2b2b; border: 1px solid #1e1e1e; border-bottom: 0; padding: 4px 8px; margin: 4px 2px 0 0; min-width: 48px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-size: 11px; }"
+						"#AssetTree { margin-top: 0; border-top-left-radius: 0; padding: 0; background: #4f4f4f; }"
 					"#AssetTree::viewport { background: #4f4f4f; }"
 				"#AssetTree::item { min-height: 26px; padding: 2px 0; margin: 4px 0; color: transparent; }"
 				"#AssetTree::item:hover { background: transparent; color: transparent; }"
 				"#AssetTree::item:selected { background: transparent; color: transparent; }"
 				"#AssetTree::indicator { width: 0px; height: 0px; margin: 0px; }"
 				"#AssetTree::branch { background: transparent; }"
-					"#OutputConsole, #OutputConsolePlain { background: #161616; }"
+					"#OutputConsole, #OutputConsoleViewport, #OutputConsolePlain, #OutputConsolePlainViewport { background: #161616; }"
 				"#OutputConsole::item { padding: 0; margin: 0; border: 0; background: transparent; }"
 				"#OutputConsole::branch { width: 0px; background: transparent; }"
 					"#ItemTitleWidget, #QuickActionStrip { background: #3a3a3a; border: 0; border-radius: 4px; }"
@@ -5749,9 +9779,17 @@ void mlMainWindow::UpdateTheme()
 					"#ItemTypeTag { border-radius: 5px; padding: 1px 6px; margin-left: 2px; font-size: 10px; font-weight: 700; border: 1px solid #4d4d4d; background: #404040; color: #c9c9c9; }"
 					"#ItemTypeTag[itemType=\"map\"] { background: #444444; color: #d0d0d0; }"
 					"#ItemTypeTag[itemType=\"mod\"] { background: #3a3a3a; color: #c4c4c4; }"
-			"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #f0f0f0; font-weight: 600; }"
+			"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #ffffff; font-weight: 600; }"
 				"#ItemInternalNameLabel { color: #bcbcbc; background: #3f3f3f; border: 1px solid #575757; border-radius: 5px; padding: 1px 6px; margin-left: 2px; }"
-			"#QuickLaunchCombo { min-height: 28px; max-height: 28px; padding: 2px 28px 2px 8px; }"
+			"#QuickLaunchCombo { min-height: 34px; max-height: 34px; }"
+			"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 6px 10px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
+			"#QuickLaunchPopup { background: #2d2d2d; border: 1px solid #505050; border-radius: 10px; }"
+			"#QuickLaunchSearch { min-height: 26px; padding: 4px 8px; background: #3a3a3a; border: 1px solid #5a5a5a; border-radius: 8px; color: #f0f0f0; }"
+			"#QuickLaunchTabs::tab { padding: 5px 10px; margin-right: 3px; background: #343434; border: 1px solid #4a4a4a; border-radius: 7px; color: #d0d0d0; }"
+			"#QuickLaunchTabs::tab:selected { background: #555555; color: #ffffff; }"
+			"#QuickLaunchList { border: 1px solid #4f4f4f; border-radius: 10px; background: #353535; color: #f0f0f0; padding: 3px; }"
+			"#QuickLaunchList::item { padding: 3px 8px; border: 1px solid transparent; border-radius: 8px; margin: 1px 0; }"
+			"#QuickLaunchList::item:selected { background: #525252; color: #ffffff; border-color: #666666; }"
 			"#ItemSelectCheckBox { spacing: 0; padding: 0; margin: 0; }"
 			"#ItemSelectCheckBox::indicator { width: 14px; height: 14px; margin: 0; }"
 			"#QuickActionStrip { min-height: 34px; }"
@@ -5765,15 +9803,23 @@ void mlMainWindow::UpdateTheme()
 			"#WarningBanner { background: #6b4b24; color: #fff0de; border: 1px solid #d58b34; border-radius: 6px; padding: 8px; }"
 					"#InfoBanner { background: #575757; color: #ededed; border: 1px solid #9a9a9a; border-radius: 6px; padding: 8px; }"
 				"#GameStateLabel { color: #7a7a7a; padding-left: 2px; }"
-					"QStatusBar { background: #2a2a2a; border-top: 1px solid #4e4e4e; }"
-					"#FooterStatusLabel { color: #d8d8d8; padding: 4px 8px; font-weight: 600; }")
+						"QStatusBar { background: #2a2a2a; border-top: 1px solid #4e4e4e; }"
+						"#FooterStatusLabel { color: #d8d8d8; padding: 4px 8px; font-weight: 600; }"
+						"#FooterRefreshButton { padding: 2px 4px; }"
+						"#FooterDownloadButton { min-height: 18px; padding: 3px 8px; }")
 			+ QString("#OutputConsole, #OutputConsolePlain { color: %1; }").arg(DefaultLogColor)
-			+ QString("QPushButton:hover, QToolButton:hover { background: #474747; border-color: %1; color: %1; }").arg(AccentHoverLight)
+			+ QString("QPushButton:hover { background: #474747; border-color: %1; color: %1; }").arg(AccentHoverLight)
+			+ "QToolBar QToolButton { margin: 0; padding: 6px 8px; border: 1px solid transparent; }"
+			+ QString("QToolBar QToolButton:hover { margin: 0; padding: 6px 8px; border: 1px solid %1; }").arg(AccentHoverLight)
+			+ "QToolBar QToolButton:pressed { margin: 0; padding: 6px 8px; border: 1px solid transparent; }"
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverLight)
-			+ QString("#CategoryTabs::tab:selected { color: #111111; background: %1; border-color: %1; }").arg(AccentHoverLight)
-			+ QString("#CategoryTabs::tab:selected:hover { background: %1; border-color: %1; color: #111111; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
-			+ QString("#CategoryTabs::tab:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
-			+ QString("QMenuBar::item:selected, QToolBar QToolButton:hover { border: 1px solid %1; }").arg(AccentHoverLight)
+				+ QString("#CategoryTabs::tab:selected { color: #111111; background: %1; border-color: %1; }").arg(AccentHoverLight)
+				+ QString("#CategoryTabs::tab:selected:hover { background: %1; border-color: %1; color: #111111; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
+				+ QString("#CategoryTabs::tab:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
+				+ QString("#OutputTabs::tab:selected { color: #111111; background: %1; border-color: %1; }").arg(AccentHoverLight)
+				+ QString("#OutputTabs::tab:selected:hover { color: #111111; background: %1; border-color: %1; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
+				+ QString("#OutputTabs::tab:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
+				+ QString("QMenuBar::item:selected { border: 1px solid %1; }").arg(AccentHoverLight)
 			+ QString("#ItemNameButton:hover { background: transparent; color: %1; }").arg(AccentHoverLight)
 			+ QString("#QuickActionButton:hover { background: #474747; border-color: %1; color: %1; }").arg(AccentHoverLight)
 			+ QString("#QuickMiniActionButton:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
@@ -5798,14 +9844,16 @@ void mlMainWindow::UpdateTheme()
 					"QMainWindow, QDialog { background: #141414; color: #eef1f4; }"
 					"#SettingsNavList { background: #1a1a1a; border: 1px solid #323232; padding: 4px; }"
 			"#SettingsNavList::item { padding: 10px 12px; border-radius: 8px; }"
-					"#SettingsNavList::item:selected { background: #303030; color: #eef1f4; }"
-			"#AssetListPanel { background: transparent; }"
-			"#CategoryTabs { background: transparent; }"
-					"#CategoryTabs::tab { background: #202020; color: #a8a8a8; border: 1px solid #363636; border-bottom: 0; padding: 9px 15px; margin: 8px 4px 0 0; min-width: 72px; border-top-left-radius: 10px; border-top-right-radius: 10px; }"
-					"QMenuBar, QToolBar { background: #1b1b1b; border: 0; spacing: 6px; padding: 8px; }"
-			"QMenuBar::item { background: transparent; padding: 6px 10px; border-radius: 8px; }"
-					"QMenuBar::item:selected, QMenu::item:selected { background: #303030; }"
-					"QMenu { background: #1b1b1b; border: 1px solid #363636; padding: 6px; }"
+						"#SettingsNavList::item:selected { background: #303030; color: #eef1f4; }"
+				"#AssetListPanel { background: transparent; }"
+				"#CategoryTabs { background: transparent; }"
+					"#CategoryTabs::tab { background: #2d2d2d; color: #d8dde2; border: 1px solid #444444; border-bottom: 0; padding: 9px 15px; margin: 8px 4px 0 0; min-width: 72px; border-top-left-radius: 10px; border-top-right-radius: 10px; }"
+				"#OutputTabs { background: transparent; }"
+				"#OutputTabs::tab { background: #1d1d1d; color: #aeb7c0; border: 1px solid #363636; border-bottom: 0; padding: 4px 8px; margin: 4px 2px 0 0; min-width: 48px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-size: 11px; }"
+						"QMenuBar, QToolBar { background: #2b2b2b; border: 0; spacing: 6px; padding: 8px; }"
+				"QMenuBar::item { background: transparent; padding: 6px 10px; border-radius: 8px; }"
+						"QMenuBar::item:selected, QMenu::item:selected { background: #454545; }"
+						"QMenu { background: #252525; border: 1px solid #454545; padding: 6px; }"
 			"QMenu::item { padding: 8px 22px; border-radius: 8px; }"
 			"QMenu::indicator { width: 14px; height: 14px; }"
 					"QSplitter::handle { background: #262626; }"
@@ -5820,7 +9868,7 @@ void mlMainWindow::UpdateTheme()
 						"#AssetTree::item:hover { background: transparent; color: transparent; }"
 						"#AssetTree::item:selected { background: transparent; color: transparent; }"
 			"#AssetTree::indicator { width: 0px; height: 0px; margin: 0px; }"
-					"#OutputConsole, #OutputConsolePlain { background: #181818; }"
+					"#OutputConsole, #OutputConsoleViewport, #OutputConsolePlain, #OutputConsolePlainViewport { background: #181818; }"
 			"#OutputConsole::item { padding: 0; margin: 0; border: 0; background: transparent; }"
 			"#OutputConsole::branch { width: 0px; background: transparent; }"
 						"#ItemRowWidget { background: transparent; }"
@@ -5835,7 +9883,8 @@ void mlMainWindow::UpdateTheme()
 			"#ItemTypeTag[itemType=\"mod\"] { background: #2a2320; color: #a08a7a; }"
 			"#ItemNameButton { background: transparent; border: 0; padding: 0; color: #eef1f4; text-align: left; font-weight: 600; }"
 			"#ItemInternalNameLabel { color: #cfcfcf; background: #232323; border: 1px solid #2f2f2f; border-radius: 5px; padding: 1px 6px; margin-left: 4px; }"
-			"QPushButton { background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; padding: 10px 16px; color: #eef1f4; min-height: 18px; }"
+				"QPushButton { background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; padding: 10px 16px; color: #eef1f4; min-height: 18px; }"
+				"#OpenFoldersButton { padding: 5px 8px; min-height: 22px; }"
 			"#ActionsPanel QPushButton { padding: 7px 16px; min-height: 14px; }"
 			"QPushButton:disabled { color: #7f8993; background: #1b1b1b; border-color: #363636; }"
 			"#QuickActionStrip { min-height: 34px; }"
@@ -5851,7 +9900,15 @@ void mlMainWindow::UpdateTheme()
 			"#ItemSelectCheckBox { spacing: 0; padding: 0; margin: 0; }"
 			"#ItemSelectCheckBox::indicator { width: 14px; height: 14px; border-radius: 4px; margin: 0; }"
 			"QComboBox { padding: 6px 28px 6px 10px; }"
-			"#QuickLaunchCombo { min-height: 26px; max-height: 26px; padding: 1px 28px 1px 10px; }"
+			"#QuickLaunchCombo { min-height: 36px; max-height: 36px; }"
+			"#QuickLaunchButton { min-height: 36px; max-height: 36px; padding: 7px 16px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
+			"#QuickLaunchPopup { background: #1b1b1b; border: 1px solid #363636; border-radius: 14px; }"
+			"#QuickLaunchSearch { min-height: 28px; padding: 5px 9px; background: #202020; border: 1px solid #363636; border-radius: 9px; color: #eef1f4; }"
+			"#QuickLaunchTabs::tab { padding: 6px 12px; margin-right: 4px; background: #242424; border: 1px solid #363636; border-radius: 9px; color: #b7bec6; }"
+			"#QuickLaunchTabs::tab:selected { background: #353535; color: #ffffff; }"
+			"#QuickLaunchList { border: 1px solid #363636; border-radius: 12px; background: #202020; color: #eef1f4; padding: 4px; }"
+			"#QuickLaunchList::item { padding: 3px 8px; border: 1px solid transparent; border-radius: 9px; margin: 1px 0; }"
+			"#QuickLaunchList::item:selected { background: #303030; color: #ffffff; border-color: #494949; }"
 			"QComboBox::drop-down { border: 0; width: 26px; subcontrol-origin: padding; subcontrol-position: top right; }"
 			"QComboBox::down-arrow { image: url(:/stylesheet/stylesheet/down_arrow.png); width: 10px; height: 10px; }"
 			"QScrollBar:vertical { background: #151515; width: 12px; margin: 8px 0; }"
@@ -5861,13 +9918,18 @@ void mlMainWindow::UpdateTheme()
 			"#SuccessBanner { background: #15241a; border: 1px solid #44d17a; border-radius: 12px; padding: 10px; }"
 			"#InfoBanner { background: #232323; border: 1px solid #3a3a3a; border-radius: 12px; padding: 10px; }"
 			"#GameStateLabel { color: #8d96a0; padding-left: 2px; }"
-			"QStatusBar { background: #1b1b1b; border-top: 1px solid #363636; }"
-			"#FooterStatusLabel { color: #cfcfcf; padding: 4px 8px; font-weight: 600; }")
+				"QStatusBar { background: #1b1b1b; border-top: 1px solid #363636; }"
+				"#FooterStatusLabel { color: #cfcfcf; padding: 4px 8px; font-weight: 600; }"
+				"#FooterRefreshButton { padding: 2px 4px; }"
+				"#FooterDownloadButton { background: #1f2d23; border: 1px solid #35523d; border-radius: 8px; min-height: 18px; padding: 3px 9px; color: #eef6f0; }")
 			+ QString("#OutputConsole, #OutputConsolePlain { color: %1; }").arg(DefaultLogColor)
-			+ QString("#CategoryTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverDark)
-			+ QString("#CategoryTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
-			+ QString("#CategoryTabs::tab:hover { color: #eef1f4; border-color: %1; }").arg(AccentHoverDark)
-			+ QString("#ItemNameButton:hover { background: transparent; color: %1; }").arg(AccentHoverDark)
+				+ QString("#CategoryTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverDark)
+				+ QString("#CategoryTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
+				+ QString("#CategoryTabs::tab:hover { color: #eef1f4; border-color: %1; }").arg(AccentHoverDark)
+				+ QString("#OutputTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverDark)
+				+ QString("#OutputTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
+				+ QString("#OutputTabs::tab:hover { color: #eef1f4; border-color: %1; }").arg(AccentHoverDark)
+				+ QString("#ItemNameButton:hover { background: transparent; color: %1; }").arg(AccentHoverDark)
 			+ QString("QPushButton:hover { background: #303030; border-color: %1; color: %1; }").arg(AccentHoverDark)
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverDark)
 			+ QString("#BuildButton, #BuildEnglishButton { background: #20262d; border-color: %1; color: #ffffff; font-weight: 700; }").arg(AccentHoverDark)
@@ -5892,20 +9954,66 @@ void mlMainWindow::UpdateTheme()
 	if (mQuickLaunchWidget)
 	{
 		if (ThemeUsesDarkModernChrome(mThemeMode))
-		{
-			mQuickLaunchWidget->setMinimumHeight(26);
-			mQuickLaunchWidget->setMaximumHeight(26);
-			if (mQuickLaunchWidget->view())
-				mQuickLaunchWidget->view()->setMaximumHeight(260);
-		}
+			mQuickLaunchWidget->SetControlHeights(36, 400);
 		else
-		{
-			mQuickLaunchWidget->setMinimumHeight(28);
-			mQuickLaunchWidget->setMaximumHeight(28);
-			if (mQuickLaunchWidget->view())
-				mQuickLaunchWidget->view()->setMaximumHeight(320);
-		}
+			mQuickLaunchWidget->SetControlHeights(34, 380);
 	}
+	AppendStartupTrace("UpdateTheme:done");
+}
+
+void mlMainWindow::UpdateQuickLaunchVisibility()
+{
+	const QTreeWidgetItem* CurrentItem = mFileListWidget ? mFileListWidget->currentItem() : NULL;
+	const int ItemType = CurrentItem ? CurrentItem->data(0, Qt::UserRole).toInt() : ML_ITEM_UNKNOWN;
+	const bool ShowQuickLaunch = (ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP);
+	if (mQuickLaunchLabel)
+		mQuickLaunchLabel->setVisible(ShowQuickLaunch);
+	if (mQuickLaunchWidget)
+		mQuickLaunchWidget->setVisible(ShowQuickLaunch);
+	if (mAnalyzeItemButton)
+		mAnalyzeItemButton->setVisible(ItemType == ML_ITEM_MAP || ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP);
+}
+
+void mlMainWindow::UpdateCategorySummary(const QHash<QString, QVariantMap>& Lookup, const QStringList& Recents, const QStringList& Favorites)
+{
+	if (!mCategorySummaryLabel)
+		return;
+
+	int MapCount = 0;
+	int ModCount = 0;
+	for (auto It = Lookup.constBegin(); It != Lookup.constEnd(); ++It)
+	{
+		const int ItemType = It.value().value("type").toInt();
+		if (ItemType == ML_ITEM_MAP)
+			MapCount++;
+		else if (ItemType == ML_ITEM_MOD_GROUP)
+			ModCount++;
+	}
+
+	auto CountValidPinned = [&](const QStringList& Keys) -> int
+	{
+		int Count = 0;
+		QSet<QString> Seen;
+		for (const QString& Key : Keys)
+		{
+			const QString NormalizedKey = Key.trimmed().toLower();
+			if (NormalizedKey.isEmpty() || Seen.contains(NormalizedKey) || !Lookup.contains(NormalizedKey))
+				continue;
+			Seen.insert(NormalizedKey);
+			Count++;
+		}
+		return Count;
+	};
+
+	const int AllCount = MapCount + ModCount;
+	const int RecentCount = CountValidPinned(Recents);
+	const int FavoriteCount = CountValidPinned(Favorites);
+	mCategorySummaryLabel->setText(QString("All: %1   Recents: %2   Favorites: %3   Mods: %4   Maps: %5")
+		.arg(AllCount)
+		.arg(RecentCount)
+		.arg(FavoriteCount)
+		.arg(ModCount)
+		.arg(MapCount));
 }
 
 void mlMainWindow::OnEditDvars()
@@ -5916,7 +10024,7 @@ void mlMainWindow::OnEditDvars()
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 
 	QLabel* Label = new QLabel(&Dialog);
-	Label->setText("Dvars that are to be used when you run the game.\nMust press \"OK\" in order to save the values!");
+	Label->setText("Saved dvars are applied automatically whenever the launcher starts the game.\nEntries marked with * differ from their default value.");
 	Layout->addWidget(Label);
 
 	QTreeWidget* DvarTree = new QTreeWidget(&Dialog);
@@ -5943,40 +10051,27 @@ void mlMainWindow::OnEditDvars()
 	if (Dialog.exec() != QDialog::Accepted)
 		return;
 
-	int size = 0;
-	QTreeWidgetItemIterator it(DvarTree);
-
-	mRunDvars.clear();
-	while (*it && size < ARRAYSIZE(gDvars))
+	for (int ItemIdx = 0; ItemIdx < DvarTree->topLevelItemCount(); ItemIdx++)
 	{
-		QWidget* widget = DvarTree->itemWidget(*it, 1);
-		QString dvarName = (*it)->data(0, 0).toString();
-		QString dvarValue;
-		dvar_s dvar = Dvar::findDvar(dvarName, DvarTree, gDvars, ARRAYSIZE(gDvars));
+		QTreeWidgetItem* Item = DvarTree->topLevelItem(ItemIdx);
+		QWidget* widget = DvarTree->itemWidget(Item, 1);
+		QString dvarName = Item->data(0, Qt::UserRole).toString();
+		dvar_s dvar = Dvar::findDvar(dvarName, gDvars, ARRAYSIZE(gDvars));
 		switch(dvar.type)
 		{
 		case DVAR_VALUE_BOOL:
-			dvarValue = Dvar::setDvarSetting(dvar, (QCheckBox*)widget);
+			Dvar::setDvarSetting(dvar, (QCheckBox*)widget);
 			break;
 		case DVAR_VALUE_INT:
-			dvarValue = Dvar::setDvarSetting(dvar, (QSpinBox*)widget);
+			Dvar::setDvarSetting(dvar, (QSpinBox*)widget);
 			break;
 		case DVAR_VALUE_STRING:
-			dvarValue = Dvar::setDvarSetting(dvar, (QLineEdit*)widget);
+			Dvar::setDvarSetting(dvar, (QLineEdit*)widget);
 			break;
 		}
-
-		if(!dvarValue.toLatin1().isEmpty())
-		{
-			if(!dvar.isCmd)
-				mRunDvars << "+set" << dvarName;
-			else			// hack for cmds
-				mRunDvars << QString("+%1").arg(dvarName);
-			mRunDvars << dvarValue;
-		}
-		size++;
-		++it;
 	}
+
+	RefreshRunDvars();
 }
 
 bool mlMainWindow::SaveWorkshopMetadata()
@@ -6012,6 +10107,75 @@ void mlMainWindow::UpdateWorkshopItem(bool UploadToWorkshop)
 	if (UploadToWorkshop)
 	{
 		const QString ContentRoot = QFileInfo(mWorkshopFolder).dir().absolutePath();
+		auto ResolveThumbnailPath = [&](const QString& ThumbnailPath) -> QString
+		{
+			const QString CleanPath = QDir::fromNativeSeparators(ThumbnailPath.trimmed());
+			if (CleanPath.isEmpty())
+				return QString();
+			QFileInfo ThumbnailInfo(CleanPath);
+			if (ThumbnailInfo.isAbsolute())
+				return ThumbnailInfo.absoluteFilePath();
+			return QDir(ContentRoot).absoluteFilePath(CleanPath);
+		};
+		auto ThumbnailProblems = [&](const QString& ResolvedPath) -> QStringList
+		{
+			QStringList Problems;
+			if (ResolvedPath.isEmpty())
+			{
+				Problems << "No workshop thumbnail is selected.";
+				return Problems;
+			}
+			QFileInfo ThumbnailInfo(ResolvedPath);
+			if (!ThumbnailInfo.exists() || !ThumbnailInfo.isFile())
+			{
+				Problems << QString("Thumbnail file was not found: %1").arg(QDir::toNativeSeparators(ResolvedPath));
+				return Problems;
+			}
+			const QString Suffix = ThumbnailInfo.suffix().toLower();
+			if (Suffix != "png" && Suffix != "jpg" && Suffix != "jpeg")
+				Problems << "Thumbnail must be a PNG or JPG image.";
+			if (ThumbnailInfo.size() > 1024 * 1024)
+				Problems << QString("Thumbnail is %1. Steam workshop thumbnails should stay under 1 MB.").arg(FormatDataSizeBytes(static_cast<quint64>(ThumbnailInfo.size())));
+			QImageReader Reader(ResolvedPath);
+			const QSize ImageSize = Reader.size();
+			if (!ImageSize.isValid())
+				Problems << "The selected image could not be read.";
+			else
+			{
+				if (ImageSize.width() != ImageSize.height())
+					Problems << QString("Thumbnail should be square. Current size: %1x%2.").arg(ImageSize.width()).arg(ImageSize.height());
+				if (!IsPowerOfTwoDimension(ImageSize.width()) || !IsPowerOfTwoDimension(ImageSize.height()))
+					Problems << "Thumbnail dimensions should be powers of two for the most reliable upload behavior.";
+			}
+			return Problems;
+		};
+		for (;;)
+		{
+			const QString ResolvedThumbnailPath = ResolveThumbnailPath(mThumbnail);
+			const QStringList Problems = ThumbnailProblems(ResolvedThumbnailPath);
+			if (Problems.isEmpty())
+				break;
+
+			QMessageBox ThumbnailWarning(this);
+			ThumbnailWarning.setWindowTitle("Workshop Thumbnail Check");
+			ThumbnailWarning.setIcon(QMessageBox::Warning);
+			ThumbnailWarning.setText("The current workshop thumbnail may fail upload.");
+			ThumbnailWarning.setInformativeText(Problems.join("\n"));
+			QAbstractButton* ContinueButton = ThumbnailWarning.addButton("Continue Anyway", QMessageBox::AcceptRole);
+			QAbstractButton* ReplaceButton = ThumbnailWarning.addButton("Choose New Thumbnail...", QMessageBox::ActionRole);
+			ThumbnailWarning.addButton(QMessageBox::Cancel);
+			ThumbnailWarning.exec();
+			if (ThumbnailWarning.clickedButton() == ContinueButton)
+				break;
+			if (ThumbnailWarning.clickedButton() != ReplaceButton)
+				return;
+
+			const QString SelectedThumbnail = QFileDialog::getOpenFileName(this, "Select Workshop Thumbnail", QFileInfo(ResolvedThumbnailPath).absolutePath(), "Images (*.png *.jpg *.jpeg)");
+			if (SelectedThumbnail.isEmpty())
+				return;
+			const QString RelativeThumbnail = QDir(ContentRoot).relativeFilePath(QDir::fromNativeSeparators(SelectedThumbnail));
+			mThumbnail = RelativeThumbnail.startsWith("..") ? QDir::fromNativeSeparators(SelectedThumbnail) : RelativeThumbnail;
+		}
 		if (HasOnlyEnglishBuild(ContentRoot))
 		{
 			if (QMessageBox::warning(this, "English Only Build Detected", "Only English localized build output was detected for this item. Uploading now may ship English-only Workshop files. Continue anyway?", QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
@@ -6025,6 +10189,7 @@ void mlMainWindow::UpdateWorkshopItem(bool UploadToWorkshop)
 	if (!mFileId)
 		return;
 
+	mWorkshopUploadInFlight = UploadToWorkshop;
 	UGCUpdateHandle_t UpdateHandle = SteamUGC()->StartItemUpdate(AppId, mFileId);
 	const QString SubmittedTitle = UploadToWorkshop ? mTitle : StripTreyarchColorCodes(mTitle);
 	const QString SubmittedDescription = UploadToWorkshop ? mBriefingDescription : SteamDescriptionForUpload(mBriefingDescription, mSteamDescription);
@@ -6148,6 +10313,9 @@ void mlMainWindow::OnCreateItemResult(CreateItemResult_t* CreateItemResult, bool
 
 void mlMainWindow::OnUpdateItemResult(SubmitItemUpdateResult_t* UpdateItemResult, bool IOFailure)
 {
+	const bool CompletedWorkshopUpload = mWorkshopUploadInFlight;
+	mWorkshopUploadInFlight = false;
+
 	if (IOFailure)
 	{
 		QMessageBox::warning(this, "Error", "Disk Read error.");
@@ -6158,6 +10326,18 @@ void mlMainWindow::OnUpdateItemResult(SubmitItemUpdateResult_t* UpdateItemResult
 	{
 		QMessageBox::warning(this, "Error", QString("Error updating Steam Workshop item. Error code: %1\nVisit https://steamerrors.com/ for more information.").arg(UpdateItemResult->m_eResult));
 		return;
+	}
+
+	if (CompletedWorkshopUpload)
+	{
+		IncrementStat("Stats/TotalWorkshopPublishes");
+		QString PublishedItemKey;
+		if (mType.compare("map", Qt::CaseInsensitive) == 0)
+			PublishedItemKey = NormalizeStatsItemKey(QString("map:%1").arg(mFolderName));
+		else if (mType.compare("mod", Qt::CaseInsensitive) == 0)
+			PublishedItemKey = NormalizeStatsItemKey(QString("mod:%1").arg(mFolderName));
+		if (!PublishedItemKey.isEmpty())
+			IncrementStat(QString("Stats/ItemsPublishCount/%1").arg(PublishedItemKey));
 	}
 
 	if (mPostUploadSteamSyncPending)
@@ -6183,16 +10363,247 @@ void mlMainWindow::OnHelpAbout()
 		"- Display names and notes\n"
 		"- Workshop version switching\n"
 		"- Background previews and theme options\n"
-		"- Ready for Publish workflow helpers");
+		"- Publish Check workflow helpers\n\n"
+		"See Help > Credits for testing and feedback credits.");
+}
+
+void mlMainWindow::OnHelpCredits()
+{
+	QMessageBox::information(this, "Credits",
+		"Original Launcher by Treyarch\n"
+		"\n"
+		"Edits and new features added by Sphynx\n"
+		"\n"
+		"Testing help:\n"
+		"- GentlemanCheeseMan\n"
+		"- APX33\n"
+		"- Coolyer\n\n"
+		"Feedback, ideas, and change suggestions:\n"
+		"- GentlemanCheeseMan\n"
+		"- Coolyer");
+}
+
+void mlMainWindow::OnHelpGuide()
+{
+	struct GuidePage
+	{
+		QString Title;
+		QString Body;
+	};
+	const QList<GuidePage> Pages = {
+		{
+			"Overview",
+			"<h2>BO3 Mod Tools Black &mdash; What's New</h2>"
+			"<p>This launcher extends the original Treyarch mod tools launcher with quality-of-life features for map and mod creators.</p>"
+			"<p>Use the list on the left to jump to any feature. All settings persist between sessions unless noted otherwise.</p>"
+		},
+		{
+			"Themes",
+			"<h2>Themes</h2>"
+			"<p>Three visual themes are available under the <b>Themes</b> menu in the menu bar:</p>"
+			"<ul>"
+			"<li><b>Modern</b> &mdash; Dark gray UI with orange accents (default). Designed for extended sessions.</li>"
+			"<li><b>Dark Modern</b> &mdash; Deep charcoal palette with a refined rounded style.</li>"
+			"<li><b>Classic</b> &mdash; Close to the original Treyarch launcher look.</li>"
+			"</ul>"
+			"<p>The active theme is saved and restored on next launch.</p>"
+			"<p>Additional cosmetic toggles live in <b>Options &rarr; Settings &rarr; Themes</b>:</p>"
+			"<ul>"
+			"<li><b>Show item type tags</b> &mdash; Displays Map / Mod labels next to each entry.</li>"
+			"<li><b>Use legacy toolbar icons</b> &mdash; Reverts toolbar icons to the classic set.</li>"
+			"<li><b>Background preview</b> &mdash; Shows the selected map/mod thumbnail behind the details panel.</li>"
+			"</ul>"
+		},
+		{
+			"Quick Launch Map",
+			"<h2>Quick Launch Map</h2>"
+			"<p>When a mod is selected in the list, a <b>Quick Launch Map</b> button appears in the details panel.</p>"
+			"<p>Click it to open a searchable popup with tabbed categories:</p>"
+			"<ul>"
+			"<li><b>General</b> &mdash; No Map / launch to main menu.</li>"
+			"<li><b>Zombies</b> &mdash; All stock zombie maps with their internal codes.</li>"
+			"<li><b>MP</b> &mdash; All stock multiplayer maps.</li>"
+			"<li><b>Campaign</b> &mdash; Story missions.</li>"
+			"</ul>"
+			"<p>Type in the search box to filter by name, map code, or detail text. The selected map is stored per session and shown on the button label.</p>"
+			"<p>Click <b>No Map</b> at the top of the popup to clear the selection.</p>"
+		},
+		{
+			"Favorites & Recents",
+			"<h2>Favorites &amp; Recents</h2>"
+			"<p>The <b>Favorites</b> and <b>Recents</b> tabs in the main list let you quickly reach frequently used entries.</p>"
+			"<ul>"
+			"<li>Right-click an entry and choose <b>Add to Favorites</b> to pin it.</li>"
+			"<li>Any build or launch action automatically records the entry to Recents.</li>"
+			"<li>Pinned full-mod entries expand their child zone files in both tabs for direct access.</li>"
+			"<li>Full-mod entries in Recents are normalized &mdash; multiple actions on the same mod count as one entry.</li>"
+			"</ul>"
+		},
+		{
+			"Display Names & Notes",
+			"<h2>Display Names &amp; Notes</h2>"
+			"<p>Each map and mod can have a custom <b>display name</b> that appears in the list instead of the internal folder name.</p>"
+			"<p>A <b>selection color</b> can also be assigned to quickly identify entries visually.</p>"
+			"<p>Right-click an entry and choose <b>Information</b> to open the info dialog, where you can:</p>"
+			"<ul>"
+			"<li>Set or edit the display name and color.</li>"
+			"<li>Add free-text notes (stored locally per entry).</li>"
+			"<li>View compile and link statistics from the last build.</li>"
+			"<li>See estimated playtime accumulated via in-launcher game launches.</li>"
+			"</ul>"
+		},
+		{
+			"Workshop Upload",
+			"<h2>Workshop Upload</h2>"
+			"<p>The <b>Publish to Workshop</b> workflow validates your package before upload:</p>"
+			"<ul>"
+			"<li>Thumbnail must exist and be a supported image type (JPG or PNG).</li>"
+			"<li>Dimensions must be at least 512&times;512 and no larger than 3840&times;2160.</li>"
+			"<li>File size must be under 1 MB.</li>"
+			"</ul>"
+			"<p>If issues are found you are prompted to <b>Continue anyway</b> or <b>Replace thumbnail</b>.</p>"
+			"<p>The <b>Ready for Publish</b> action in the toolbar runs an all-languages publish-prep build and can optionally bake map lights.</p>"
+		},
+		{
+			"Build Actions",
+			"<h2>Build Actions</h2>"
+			"<p>The toolbar and Build menu expose several compile modes:</p>"
+			"<ul>"
+			"<li><b>Build</b> &mdash; Compile and link the selected zone using the default language.</li>"
+			"<li><b>Build All Languages</b> &mdash; Runs the linker for all supported language variants.</li>"
+			"<li><b>Build Without Language</b> &mdash; Skips the language pass entirely.</li>"
+			"<li><b>Ready for Publish</b> &mdash; Full publish-prep pass with optional light baking.</li>"
+			"</ul>"
+			"<p>While a build is running, the <b>Cancel</b> button terminates the linker process. Build output is shown live in the console panel.</p>"
+		},
+		{
+			"Game Launch",
+			"<h2>Game Launch</h2>"
+			"<p>The <b>Start Game</b> button launches BlackOps3.exe as a detached process. This means:</p>"
+			"<ul>"
+			"<li>The <b>Build</b> button becomes available again while the game is running.</li>"
+			"<li>The launcher stays open and functional while you play-test.</li>"
+			"</ul>"
+			"<p>Online mode launches via Steam with <code>+set fs_game &lt;mod&gt;</code>. Workshop selections add <code>+set workshopid &lt;id&gt;</code> automatically.</p>"
+			"<p>Custom dvars can be added in <b>Options &rarr; Dvars</b> and are appended to every launch command.</p>"
+		},
+		{
+			"Console & Output",
+			"<h2>Console &amp; Output</h2>"
+			"<p>The output console at the bottom of the window shows linker and game log output.</p>"
+			"<ul>"
+			"<li>Output is color-coded by message type (errors in red, warnings in yellow, info in white).</li>"
+			"<li>Color coding can be toggled in <b>Options &rarr; Settings &rarr; Console Display</b>.</li>"
+			"<li>Multiple output tabs (Linker, Game Log, etc.) can be reordered by dragging.</li>"
+			"<li>The <b>Log Filters</b> button next to the tab bar hides or shows specific message categories.</li>"
+			"</ul>"
+		},
+		{
+			"Toolbar Customization",
+			"<h2>Toolbar Customization</h2>"
+			"<p>Right-click the toolbar to open the <b>Customize Toolbar</b> dialog.</p>"
+			"<ul>"
+			"<li>Built-in actions can be shown or hidden.</li>"
+			"<li>Custom items can be added to chain scripts, executables, URLs, files, or folders.</li>"
+			"<li>Custom item types: <code>builtin:</code>, <code>exe:</code>, <code>url:</code>, <code>file:</code>, <code>folder:</code>.</li>"
+			"<li>All customizations are saved in settings and restored on next launch.</li>"
+			"</ul>"
+			"<p>The <b>Extra Tools</b> dropdown in the toolbar provides quick access to Radiant, the Asset Exporter, and other tools.</p>"
+		},
+		{
+			"Auto Updates",
+			"<h2>Auto Updates</h2>"
+			"<p>The launcher checks for updates automatically on startup (can be disabled in <b>Options &rarr; Settings &rarr; General</b>).</p>"
+			"<p>When an update is available, a banner appears in the status bar. Click it or use <b>Help &rarr; Check for Updates</b> to review and install.</p>"
+			"<p>The updater is a separate <code>LauncherUpdater.exe</code> process that:</p>"
+			"<ul>"
+			"<li>Waits for the launcher to exit before applying files.</li>"
+			"<li>Creates a backup of replaced files.</li>"
+			"<li>Rolls back automatically if anything fails.</li>"
+			"<li>Restarts the launcher when done.</li>"
+			"</ul>"
+		},
+		{
+			"Startup Quotes",
+			"<h2>Startup Quotes</h2>"
+			"<p>An optional inspirational quote can be shown each time the launcher starts.</p>"
+			"<p>Enable this in <b>Options &rarr; Settings &rarr; General &rarr; Show startup quote</b>.</p>"
+			"<p>This option is off by default.</p>"
+		},
+	};
+
+	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+	Dialog.setWindowTitle("Guide \342\200\224 BO3 Mod Tools Black");
+	Dialog.resize(860, 560);
+	Dialog.setMinimumSize(700, 420);
+
+	QHBoxLayout* RootLayout = new QHBoxLayout(&Dialog);
+	RootLayout->setContentsMargins(0, 0, 0, 0);
+	RootLayout->setSpacing(0);
+
+	QListWidget* NavList = new QListWidget(&Dialog);
+	NavList->setObjectName("SettingsNavList");
+	NavList->setFixedWidth(180);
+	NavList->setFocusPolicy(Qt::NoFocus);
+	for (const GuidePage& Page : Pages)
+		NavList->addItem(Page.Title);
+
+	QTextBrowser* ContentView = new QTextBrowser(&Dialog);
+	ContentView->setOpenExternalLinks(true);
+	const QColor GuideBg = Dialog.palette().color(QPalette::Base);
+	const QColor GuideText = Dialog.palette().color(QPalette::Text);
+	const QColor GuideLink = ThemeUsesClassicChrome(mThemeMode)
+		? QColor("#2a74cc")
+		: (ThemeUsesDarkModernChrome(mThemeMode) ? QColor("#8dbdff") : QColor("#7ea9ff"));
+	ContentView->setStyleSheet(QString("QTextBrowser { border: 0; padding: 0; background: %1; color: %2; } a { color: %3; }")
+		.arg(GuideBg.name(QColor::HexRgb), GuideText.name(QColor::HexRgb), GuideLink.name(QColor::HexRgb)));
+
+	RootLayout->addWidget(NavList);
+	RootLayout->addWidget(ContentView, 1);
+
+	QObject::connect(NavList, &QListWidget::currentRowChanged, &Dialog, [&](int Row)
+	{
+		if (Row < 0 || Row >= Pages.count())
+			return;
+		ContentView->setHtml(
+			QString("<html><body style=\"font-family:sans-serif; font-size:13px; color:%1; background:%2; padding:18px; line-height:1.45;\">")
+				.arg(GuideText.name(QColor::HexRgb), GuideBg.name(QColor::HexRgb))
+			+ Pages[Row].Body
+			+ "</body></html>");
+	});
+
+	NavList->setCurrentRow(0);
+
+	QPushButton* CloseBtn = new QPushButton("Close", &Dialog);
+	connect(CloseBtn, &QPushButton::clicked, &Dialog, &QDialog::accept);
+
+	QVBoxLayout* RightLayout = new QVBoxLayout();
+	RightLayout->setContentsMargins(0, 0, 0, 0);
+	RightLayout->setSpacing(0);
+	RightLayout->addWidget(ContentView, 1);
+	QHBoxLayout* FooterRow = new QHBoxLayout();
+	FooterRow->setContentsMargins(12, 8, 12, 10);
+	FooterRow->addStretch();
+	FooterRow->addWidget(CloseBtn);
+	RightLayout->addLayout(FooterRow);
+
+	// Replace placeholder content layout with proper right panel
+	RootLayout->removeWidget(ContentView);
+	RootLayout->addLayout(RightLayout);
+
+	Dialog.exec();
+}
+
+void mlMainWindow::OnCheckForUpdates()
+{
+	CheckForUpdates(true);
 }
 
 void mlMainWindow::OnOpenZoneFile()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
 		return;
-	
-	QTreeWidgetItem* Item = ItemList[0];
 
 	if (Item->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
 	{
@@ -6211,31 +10622,73 @@ void mlMainWindow::OnOpenZoneFile()
 
 void mlMainWindow::OnOpenModRootFolder()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	if (mGamePath.trimmed().isEmpty())
 		return;
 
-	QTreeWidgetItem* Item = ItemList[0];
+	QTreeWidgetItem* Item = ActiveFileItem();
+	QString Folder = QDir::cleanPath(mGamePath);
+	if (Item)
+	{
+		if (Item->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
+			Folder = QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, GetItemEntryName(Item)));
+		else
+			Folder = QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, GetItemContainerName(Item)));
+	}
 
-	if (Item->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
+	ShellExecute(NULL, "open", (QString("\"%1\"").arg(Folder)).toLatin1().constData(), "", NULL, SW_SHOWDEFAULT);
+}
+
+void mlMainWindow::OnOpenConsoleLog()
+{
+	const QString LogPath = ResolveConsoleLogPath(mGamePath, ActiveFileItem());
+	if (LogPath.trimmed().isEmpty())
 	{
-		QString MapName = GetItemEntryName(Item);
-		ShellExecute(NULL, "open", (QString("\"%1/usermaps/%2\"").arg(mGamePath, MapName)).toLatin1().constData(), "", NULL, SW_SHOWDEFAULT);
+		QMessageBox::information(this, "Open console_mp.log", "No console log path could be resolved.");
+		return;
 	}
-	else
+
+	if (!QFileInfo(LogPath).isFile())
 	{
-		QString ModName = GetItemContainerName(Item);
-		ShellExecute(NULL, "open", (QString("\"%1/mods/%2\"").arg(mGamePath, ModName)).toLatin1().constData(), "", NULL, SW_SHOWDEFAULT);
+		QMessageBox::information(this, "Open console_mp.log", QString("console_mp.log was not found.\n\n%1").arg(QDir::toNativeSeparators(LogPath)));
+		return;
 	}
+
+	ShowTextFileDialog(this, LogPath, "console_mp.log");
+}
+
+void mlMainWindow::OnOpenConsoleLogExternal()
+{
+	const QString LogPath = ResolveConsoleLogPath(mGamePath, ActiveFileItem());
+	if (LogPath.trimmed().isEmpty())
+	{
+		QMessageBox::information(this, "Open console_mp.log", "No console log path could be resolved.");
+		return;
+	}
+
+	if (!QFileInfo(LogPath).isFile())
+	{
+		QMessageBox::information(this, "Open console_mp.log", QString("console_mp.log was not found.\n\n%1").arg(QDir::toNativeSeparators(LogPath)));
+		return;
+	}
+
+	OpenPathWithDefaultApp(LogPath);
+}
+
+void mlMainWindow::OnOpenScriptReference()
+{
+	QDesktopServices::openUrl(QUrl("https://jbird632.github.io/index.html"));
 }
 
 void mlMainWindow::OnRunMapOrMod()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
 		return;
-
-	QTreeWidgetItem* Item = ItemList[0];
+	if (ItemCheckState(Item) != Qt::Checked)
+	{
+		QMessageBox::information(this, "Start", "Check the selected map or mod first to launch it.");
+		return;
+	}
 	QString FsGame;
 	QString MapName;
 
@@ -6251,6 +10704,7 @@ void mlMainWindow::OnRunMapOrMod()
 		TouchRecentEntry(RecentEntryForItem(Item->data(0, Qt::UserRole).toInt(), ModName, GetItemEntryName(Item)));
 		FsGame = ModName;
 	}
+	QueueGameStatsForItem(GetItemFavoriteKey(Item));
 
 	QList<QPair<QString, QStringList>> Commands;
 	Commands.append(CreateGameLaunchCommand(FsGame, MapName));
@@ -6314,16 +10768,14 @@ void mlMainWindow::OnSaveLog() const
 
 void mlMainWindow::OnCleanXPaks()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
 		return;
-
-	QTreeWidgetItem* Item = ItemList[0];
 	QString Folder;
 
 	if (Item->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
 	{
-		QString MapName = Item->text(0);
+		QString MapName = GetItemEntryName(Item);
 		Folder = QString("%1/usermaps/%2").arg(mGamePath, MapName);
 	}
 	else
@@ -6360,16 +10812,14 @@ void mlMainWindow::OnCleanXPaks()
 
 void mlMainWindow::OnDelete()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
 		return;
-
-	QTreeWidgetItem* Item = ItemList[0];
 	QString Folder;
 
 	if (Item->data(0, Qt::UserRole).toInt() == ML_ITEM_MAP)
 	{
-		QString MapName = Item->text(0);
+		QString MapName = GetItemEntryName(Item);
 		Folder = QString("%1/usermaps/%2").arg(mGamePath, MapName);
 	}
 	else
@@ -6383,6 +10833,1201 @@ void mlMainWindow::OnDelete()
 
 	QDir(Folder).removeRecursively();
 	PopulateFileList();
+}
+
+void mlMainWindow::OnRenameItem()
+{
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
+		return;
+
+	const int RawItemType = Item->data(0, Qt::UserRole).toInt();
+	if (RawItemType != ML_ITEM_MAP && RawItemType != ML_ITEM_MOD && RawItemType != ML_ITEM_MOD_GROUP)
+		return;
+
+	const bool IsMap = (RawItemType == ML_ITEM_MAP);
+	const QString CurrentName = IsMap ? GetItemEntryName(Item) : GetItemContainerName(Item);
+
+	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+	Dialog.setWindowTitle(IsMap ? "Rename Map" : "Rename Mod");
+	Dialog.resize(860, 300);
+	Dialog.setMinimumSize(800, 280);
+	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+
+	QLabel* IntroLabel = new QLabel(
+		QString("Rename '%1'. This rewrites matching file names and script references, and stores a backup under launcher data before changing anything.")
+			.arg(CurrentName),
+		&Dialog);
+	IntroLabel->setWordWrap(true);
+	Layout->addWidget(IntroLabel);
+
+	QFormLayout* FormLayout = new QFormLayout();
+	QLineEdit* NameWidget = new QLineEdit(CurrentName, &Dialog);
+	NameWidget->setValidator(new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_]*"), &Dialog));
+	FormLayout->addRow("New name:", NameWidget);
+	Layout->addLayout(FormLayout);
+
+	QCheckBox* DuplicateWidget = new QCheckBox("Duplicate instead of fully rename (keep old)", &Dialog);
+	DuplicateWidget->setChecked(true);
+	Layout->addWidget(DuplicateWidget);
+
+	QDialogButtonBox* Buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &Dialog);
+	connect(Buttons, SIGNAL(accepted()), &Dialog, SLOT(accept()));
+	connect(Buttons, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	Layout->addWidget(Buttons);
+
+	if (Dialog.exec() != QDialog::Accepted)
+		return;
+
+	const QString NewName = NameWidget->text().trimmed().toLower();
+	if (NewName.isEmpty())
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", "The new name cannot be empty.");
+		return;
+	}
+
+	if (NewName.compare(CurrentName, Qt::CaseInsensitive) == 0)
+	{
+		QMessageBox::information(this, IsMap ? "Rename Map" : "Rename Mod", "Choose a different name to rename or duplicate this item.");
+		return;
+	}
+
+	if (IsMap && mShippedMapList.contains(NewName, Qt::CaseInsensitive))
+	{
+		QMessageBox::warning(this, "Rename Map", "The new map name cannot match a built-in map.");
+		return;
+	}
+
+	RenameSelectedItem(Item, NewName, DuplicateWidget->isChecked());
+}
+
+bool mlMainWindow::RenameSelectedItem(QTreeWidgetItem* Item, const QString& NewName, bool DuplicateMode)
+{
+	if (!Item)
+		return false;
+
+	const int RawItemType = Item->data(0, Qt::UserRole).toInt();
+	const bool IsMap = (RawItemType == ML_ITEM_MAP);
+	const int ItemType = IsMap ? ML_ITEM_MAP : ML_ITEM_MOD_GROUP;
+	const QString OldName = IsMap ? GetItemEntryName(Item) : GetItemContainerName(Item);
+	const QString SourceFolder = IsMap
+		? QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, OldName))
+		: QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, OldName));
+	const QString TargetFolder = IsMap
+		? QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, NewName))
+		: QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, NewName));
+
+	if (!QDir(SourceFolder).exists())
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", QString("The source folder '%1' does not exist.").arg(QDir::toNativeSeparators(SourceFolder)));
+		return false;
+	}
+
+	if (QFileInfo(TargetFolder).exists())
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", QString("The target folder '%1' already exists.").arg(QDir::toNativeSeparators(TargetFolder)));
+		return false;
+	}
+
+	QString Error;
+	const QString BackupStamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+	const QString BackupRoot = QDir::cleanPath(QString("%1/rename_backups/%2/%3_%4")
+		.arg(LauncherDataRoot(), IsMap ? "maps" : "mods", OldName, BackupStamp));
+	if (!QDir().mkpath(BackupRoot))
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", QString("Unable to create backup folder '%1'.").arg(QDir::toNativeSeparators(BackupRoot)));
+		return false;
+	}
+
+	if (!CopyDirectoryRecursive(SourceFolder, QDir::cleanPath(QString("%1/%2/%3").arg(BackupRoot, IsMap ? "usermaps" : "mods", OldName)), &Error))
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+
+	const QString NotesSourcePath = NotesFilePath(ItemType, OldName, OldName);
+	const QString NotesTargetPath = NotesFilePath(ItemType, NewName, NewName);
+	const QString VersionsSourceRoot = WorkshopVersionsRoot(ItemType, OldName, OldName);
+	const QString VersionsTargetRoot = WorkshopVersionsRoot(ItemType, NewName, NewName);
+	if (QFileInfo(NotesSourcePath).isFile() && !CopyFilePlain(NotesSourcePath, QDir::cleanPath(QString("%1/launcher_data/%2").arg(BackupRoot, QFileInfo(NotesSourcePath).fileName())), &Error))
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+	if (QDir(VersionsSourceRoot).exists() && !CopyDirectoryRecursive(VersionsSourceRoot, QDir::cleanPath(QString("%1/workshop_versions").arg(BackupRoot)), &Error))
+	{
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+
+	QStringList MapSourceMatches;
+	QStringList RawMatches;
+	const QString OldPrefix = OldName.left(2).toLower();
+	const QString NewPrefix = NewName.left(2).toLower();
+	const QString MapSourceRoot = QDir::cleanPath(QString("%1/map_source").arg(mGamePath));
+	const QString RawMapsRoot = QDir::cleanPath(QString("%1/raw/maps").arg(mGamePath));
+	auto RenamedMapRelativePath = [&](const QString& RootPath, const QString& FilePath) -> QString
+	{
+		QString RelativePath = QDir(RootPath).relativeFilePath(FilePath);
+		if (IsMap && RelativePath.startsWith(OldPrefix + "/", Qt::CaseInsensitive))
+			RelativePath = NewPrefix + RelativePath.mid(OldPrefix.length());
+		RelativePath.replace(OldName, NewName);
+		return RelativePath;
+	};
+
+	if (IsMap)
+	{
+		MapSourceMatches = CollectFilesWhoseRelativePathContains(MapSourceRoot, OldName);
+		RawMatches = CollectFilesWhoseRelativePathContains(RawMapsRoot, OldName);
+
+		for (const QString& SourcePath : MapSourceMatches)
+		{
+			const QString BackupPath = QDir::cleanPath(QString("%1/map_source/%2").arg(BackupRoot, QDir(MapSourceRoot).relativeFilePath(SourcePath)));
+			if (!CopyFilePlain(SourcePath, BackupPath, &Error))
+			{
+				QMessageBox::warning(this, "Rename Map", Error);
+				return false;
+			}
+
+			const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(MapSourceRoot, RenamedMapRelativePath(MapSourceRoot, SourcePath)));
+			if (QFileInfo(TargetPath).exists())
+			{
+				QMessageBox::warning(this, "Rename Map", QString("The target file '%1' already exists.").arg(QDir::toNativeSeparators(TargetPath)));
+				return false;
+			}
+		}
+
+		for (const QString& SourcePath : RawMatches)
+		{
+			const QString BackupPath = QDir::cleanPath(QString("%1/raw/maps/%2").arg(BackupRoot, QDir(RawMapsRoot).relativeFilePath(SourcePath)));
+			if (!CopyFilePlain(SourcePath, BackupPath, &Error))
+			{
+				QMessageBox::warning(this, "Rename Map", Error);
+				return false;
+			}
+
+			const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(RawMapsRoot, RenamedMapRelativePath(RawMapsRoot, SourcePath)));
+			if (QFileInfo(TargetPath).exists())
+			{
+				QMessageBox::warning(this, "Rename Map", QString("The target file '%1' already exists.").arg(QDir::toNativeSeparators(TargetPath)));
+				return false;
+			}
+		}
+	}
+
+	if (!CopyDirectoryWithRenameTransform(SourceFolder, TargetFolder, OldName, NewName, &Error))
+	{
+		QDir(TargetFolder).removeRecursively();
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+
+	if (QFileInfo(NotesSourcePath).isFile() && !CopyFilePlain(NotesSourcePath, NotesTargetPath, &Error))
+	{
+		QDir(TargetFolder).removeRecursively();
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+
+	if (QDir(VersionsSourceRoot).exists() && !CopyDirectoryRecursive(VersionsSourceRoot, VersionsTargetRoot, &Error))
+	{
+		QDir(TargetFolder).removeRecursively();
+		QMessageBox::warning(this, IsMap ? "Rename Map" : "Rename Mod", Error);
+		return false;
+	}
+
+	if (IsMap)
+	{
+		for (const QString& SourcePath : MapSourceMatches)
+		{
+			const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(MapSourceRoot, RenamedMapRelativePath(MapSourceRoot, SourcePath)));
+			if (!CopyFileWithRenameTransform(SourcePath, TargetPath, OldName, NewName, &Error))
+			{
+				QMessageBox::warning(this, "Rename Map", Error);
+				return false;
+			}
+		}
+
+		for (const QString& SourcePath : RawMatches)
+		{
+			const QString TargetPath = QDir::cleanPath(QString("%1/%2").arg(RawMapsRoot, RenamedMapRelativePath(RawMapsRoot, SourcePath)));
+			if (!CopyFileWithRenameTransform(SourcePath, TargetPath, OldName, NewName, &Error))
+			{
+				QMessageBox::warning(this, "Rename Map", Error);
+				return false;
+			}
+		}
+	}
+
+	const QString OldFavoriteKey = RecentEntryForItem(ItemType, OldName, OldName);
+	const QString NewFavoriteKey = RecentEntryForItem(ItemType, NewName, NewName);
+	QSettings Settings;
+	QStringList Favorites = FavoriteEntries();
+	for (QString& Entry : Favorites)
+	{
+		if (!DuplicateMode && Entry.compare(OldFavoriteKey, Qt::CaseInsensitive) == 0)
+			Entry = NewFavoriteKey;
+	}
+	if (DuplicateMode && Favorites.contains(OldFavoriteKey, Qt::CaseInsensitive) && !Favorites.contains(NewFavoriteKey, Qt::CaseInsensitive))
+		Favorites.append(NewFavoriteKey);
+	{
+		QStringList DedupedFavorites;
+		QSet<QString> Seen;
+		for (const QString& Entry : Favorites)
+		{
+			const QString Normalized = Entry.trimmed().toLower();
+			if (Normalized.isEmpty() || Seen.contains(Normalized))
+				continue;
+			Seen.insert(Normalized);
+			DedupedFavorites << Entry;
+		}
+		Favorites = DedupedFavorites;
+	}
+	Settings.setValue("Favorites", Favorites);
+
+	QStringList Recents = RecentEntries();
+	for (QString& Entry : Recents)
+	{
+		if (!DuplicateMode && Entry.compare(OldFavoriteKey, Qt::CaseInsensitive) == 0)
+			Entry = NewFavoriteKey;
+	}
+	if (DuplicateMode)
+		Recents.prepend(NewFavoriteKey);
+	{
+		QStringList DedupedRecents;
+		QSet<QString> Seen;
+		for (const QString& Entry : Recents)
+		{
+			const QString Normalized = Entry.trimmed().toLower();
+			if (Normalized.isEmpty() || Seen.contains(Normalized))
+				continue;
+			Seen.insert(Normalized);
+			DedupedRecents << Entry;
+		}
+		Recents = DedupedRecents;
+	}
+	while (Recents.count() > 12)
+		Recents.removeLast();
+	Settings.setValue("Recents", Recents);
+
+	const QString OldDisplayName = DisplayNameForEntry(OldFavoriteKey);
+	const QString OldDisplayColor = DisplayColorForEntry(OldFavoriteKey);
+	if (!OldDisplayName.isEmpty())
+		SetDisplayNameForEntry(NewFavoriteKey, OldDisplayName);
+	if (!OldDisplayColor.isEmpty())
+		SetDisplayColorForEntry(NewFavoriteKey, OldDisplayColor);
+
+	const QString OldStatsKey = NormalizeStatsItemKey(OldFavoriteKey);
+	const QString NewStatsKey = NormalizeStatsItemKey(NewFavoriteKey);
+	for (const QString& Suffix : QStringList() << "LauncherSeconds" << "RadiantSeconds")
+	{
+		const QString OldKey = QString("Stats/Items/%1/%2").arg(OldStatsKey, Suffix);
+		const QVariant OldValue = Settings.value(OldKey);
+		if (OldValue.isValid())
+			Settings.setValue(QString("Stats/Items/%1/%2").arg(NewStatsKey, Suffix), OldValue);
+	}
+	const QVariant PublishCountValue = Settings.value(QString("Stats/ItemsPublishCount/%1").arg(OldStatsKey));
+	if (PublishCountValue.isValid())
+		Settings.setValue(QString("Stats/ItemsPublishCount/%1").arg(NewStatsKey), PublishCountValue);
+
+	if (!DuplicateMode)
+	{
+		QDir(SourceFolder).removeRecursively();
+		if (QFileInfo(NotesSourcePath).exists())
+			QFile::remove(NotesSourcePath);
+		if (QDir(VersionsSourceRoot).exists())
+			QDir(VersionsSourceRoot).removeRecursively();
+		if (IsMap)
+		{
+			for (const QString& SourcePath : MapSourceMatches)
+				QFile::remove(SourcePath);
+			for (const QString& SourcePath : RawMatches)
+				QFile::remove(SourcePath);
+		}
+
+		Settings.remove(QString("DisplayNames/%1").arg(OldFavoriteKey.toLower()));
+		Settings.remove(QString("DisplayColors/%1").arg(OldFavoriteKey.toLower()));
+		Settings.remove(QString("Stats/Items/%1").arg(OldStatsKey));
+		Settings.remove(QString("Stats/ItemsPublishCount/%1").arg(OldStatsKey));
+	}
+
+	PopulateFileList();
+	QMessageBox::information(this,
+		IsMap ? "Rename Map" : "Rename Mod",
+		QString("%1 '%2' as '%3'.\n\nBackup saved to:\n%4")
+			.arg(DuplicateMode ? "Duplicated" : "Renamed", OldName, NewName, QDir::toNativeSeparators(BackupRoot)));
+	return true;
+}
+
+void mlMainWindow::OnAnalyzeItem()
+{
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
+	{
+		QMessageBox::information(this, "Analyze", "Select a map or mod first.");
+		return;
+	}
+
+	const int ItemType = Item->data(0, Qt::UserRole).toInt();
+	if (ItemType == ML_ITEM_UNKNOWN)
+	{
+		QMessageBox::information(this, "Analyze", "Select a map or mod first.");
+		return;
+	}
+
+	const bool IsMap = (ItemType == ML_ITEM_MAP);
+	const QString TitleName = IsMap ? GetItemEntryName(Item) : GetItemContainerName(Item);
+	const QString Prefix = TitleName.left(2).toLower();
+	QProgressDialog ProgressDialog(this);
+	ProgressDialog.setWindowTitle(QString("Analyze %1").arg(IsMap ? "Map" : "Mod"));
+	ProgressDialog.setLabelText(QString("Preparing analysis for %1 '%2'...").arg(IsMap ? "map" : "mod", TitleName));
+	ProgressDialog.setCancelButtonText("Cancel");
+	ProgressDialog.setRange(0, 8);
+	ProgressDialog.setMinimumDuration(0);
+	ProgressDialog.setWindowModality(Qt::WindowModal);
+	ProgressDialog.setValue(0);
+	ProgressDialog.show();
+	QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+	auto UpdateAnalyzeProgress = [&](int Value, const QString& Label) -> bool
+	{
+		ProgressDialog.setLabelText(Label);
+		ProgressDialog.setValue(Value);
+		QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		return !ProgressDialog.wasCanceled();
+	};
+
+	const QString ContentRoot = IsMap
+		? QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, TitleName))
+		: QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, TitleName));
+	const QString ScriptsRoot = QDir::cleanPath(QString("%1/scripts").arg(ContentRoot));
+	const QString UiRoot = QDir::cleanPath(QString("%1/ui").arg(ContentRoot));
+	const QString LuaRoot = QDir::cleanPath(QString("%1/lua").arg(ContentRoot));
+	const QString GamedataRoot = QDir::cleanPath(QString("%1/gamedata").arg(ContentRoot));
+	const QString ZoneSourceRoot = QDir::cleanPath(QString("%1/zone_source").arg(ContentRoot));
+	const QString ZoneOutputRoot = QDir::cleanPath(QString("%1/zone").arg(ContentRoot));
+
+	QStringList Findings;
+	QStringList Warnings;
+	if (!UpdateAnalyzeProgress(1, QString("Loading defaults for %1 '%2'...").arg(IsMap ? "map" : "mod", TitleName)))
+		return;
+	QString DefaultScriptsManifestError;
+	QString DefaultUiManifestError;
+	const QSet<QString> DefaultScriptsManifest = LoadDefaultScriptsManifest(&DefaultScriptsManifestError);
+	const QSet<QString> DefaultUiManifest = LoadDefaultUiManifest(&DefaultUiManifestError);
+	QString LoadedDefaultScriptsManifestPath = DefaultScriptsManifestPath();
+	if (!QFileInfo(LoadedDefaultScriptsManifestPath).isFile())
+	{
+		if (QFile::exists(":/resources/default_scripts.txt"))
+			LoadedDefaultScriptsManifestPath = ":/resources/default_scripts.txt";
+		else
+			LoadedDefaultScriptsManifestPath = QDir::cleanPath(QString("%1/default_scripts.txt").arg(LauncherDataRoot()));
+	}
+	const QMultiHash<QString, QString> DefaultScriptNamespaces = LoadDefaultScriptNamespacesFromManifest(LoadedDefaultScriptsManifestPath);
+	QHash<QString, QSet<QString>> DefaultNamespacesByScriptPath;
+	for (auto It = DefaultScriptNamespaces.constBegin(); It != DefaultScriptNamespaces.constEnd(); ++It)
+		DefaultNamespacesByScriptPath[It.value()].insert(It.key());
+	auto CheckRequiredFile = [&](const QString& Path, const QString& Label)
+	{
+		if (QFileInfo(Path).isFile())
+			Findings << QString("Found %1: %2").arg(Label, QDir::toNativeSeparators(Path));
+		else
+			Warnings << QString("Missing %1: %2").arg(Label, QDir::toNativeSeparators(Path));
+	};
+	auto SharedScriptAssetPath = [](const QString& AssetPath) -> QString
+	{
+		return NormalizeDefaultManifestPath(QString("share/raw/%1").arg(AssetPath));
+	};
+	auto GlobalRawPath = [&](const QString& AssetPath) -> QString
+	{
+		return QDir::cleanPath(QString("%1/raw/%2").arg(mGamePath, AssetPath));
+	};
+	auto ContentAssetPath = [&](const QString& AssetPath) -> QString
+	{
+		return QDir::cleanPath(QString("%1/%2").arg(ContentRoot, AssetPath));
+	};
+	auto AssetSourceLabel = [&](const QString& AssetPath) -> QString
+	{
+		const QString LocalPath = ContentAssetPath(AssetPath);
+		const QString UnsafeGlobalPath = GlobalRawPath(AssetPath);
+		const bool IsUiAsset = AssetPath.startsWith("ui/", Qt::CaseInsensitive) || AssetPath.startsWith("lua/", Qt::CaseInsensitive);
+		if (QFileInfo(LocalPath).isFile())
+			return "local";
+		if (QFileInfo(UnsafeGlobalPath).isFile())
+			return "unsafe-global";
+		if ((IsUiAsset && ManifestContainsUiAsset(DefaultUiManifest, AssetPath))
+			|| (!IsUiAsset && DefaultScriptsManifest.contains(SharedScriptAssetPath(AssetPath))))
+			return "default";
+		return "missing";
+	};
+
+	if (!QDir(ContentRoot).exists())
+	{
+		ProgressDialog.cancel();
+		QMessageBox::warning(this, "Analyze", QString("The folder '%1' does not exist.").arg(QDir::toNativeSeparators(ContentRoot)));
+		return;
+	}
+	if (!DefaultScriptsManifestError.isEmpty())
+		Warnings << DefaultScriptsManifestError;
+	else if (QFileInfo(DefaultScriptsManifestPath()).isFile())
+		Findings << QString("Default scripts manifest: %1").arg(QDir::toNativeSeparators(DefaultScriptsManifestPath()));
+	else if (QFile::exists(":/resources/default_scripts.txt"))
+		Findings << "Default scripts manifest: bundled resource (:/resources/default_scripts.txt)";
+	else
+		Findings << QString("Default scripts manifest: %1").arg(QDir::toNativeSeparators(QDir::cleanPath(QString("%1/default_scripts.txt").arg(LauncherDataRoot()))));
+	if (!DefaultUiManifestError.isEmpty())
+		Warnings << DefaultUiManifestError;
+	else if (QFileInfo(DefaultUiManifestPath()).isFile())
+		Findings << QString("Default UI manifest: %1").arg(QDir::toNativeSeparators(DefaultUiManifestPath()));
+	else if (QFile::exists(":/resources/default_ui.txt"))
+		Findings << "Default UI manifest: bundled resource (:/resources/default_ui.txt)";
+	else
+		Findings << QString("Default UI manifest: %1").arg(QDir::toNativeSeparators(QDir::cleanPath(QString("%1/default_ui.txt").arg(LauncherDataRoot()))));
+
+	CheckRequiredFile(QDir::cleanPath(QString("%1/zone/workshop.json").arg(ContentRoot)), "workshop.json");
+	if (!UpdateAnalyzeProgress(2, QString("Checking project files for '%1'...").arg(TitleName)))
+		return;
+
+	QStringList ZoneFilePaths;
+	QStringList PrimaryEntrypoints;
+	if (IsMap)
+	{
+		const QString ZoneFilePath = QDir::cleanPath(QString("%1/%2.zone").arg(ZoneSourceRoot, TitleName));
+		ZoneFilePaths << ZoneFilePath;
+		PrimaryEntrypoints
+			<< QDir::cleanPath(QString("%1/%2/%3.gsc").arg(ScriptsRoot, Prefix, TitleName))
+			<< QDir::cleanPath(QString("%1/%2/%3.csc").arg(ScriptsRoot, Prefix, TitleName))
+			<< QDir::cleanPath(QString("%1/%2/_load.gsc").arg(ScriptsRoot, Prefix))
+			<< QDir::cleanPath(QString("%1/%2/_load.csc").arg(ScriptsRoot, Prefix));
+
+		CheckRequiredFile(QDir::cleanPath(QString("%1/map_source/%2/%3.map").arg(mGamePath, Prefix, TitleName)), "Radiant .map source");
+		CheckRequiredFile(QDir::cleanPath(QString("%1/map_source/%2/%3.bak").arg(mGamePath, Prefix, TitleName)), "Radiant .bak source");
+		CheckRequiredFile(QDir::cleanPath(QString("%1/sound/zoneconfig/%2.szc").arg(ContentRoot, TitleName)), "sound zone config");
+	}
+	else
+	{
+		for (const QString& ZoneName : ModZoneNames(TitleName))
+			ZoneFilePaths << QDir::cleanPath(QString("%1/%2.zone").arg(ZoneSourceRoot, ZoneName));
+		PrimaryEntrypoints
+			<< QDir::cleanPath(QString("%1/%2/_load.gsc").arg(ScriptsRoot, Prefix))
+			<< QDir::cleanPath(QString("%1/%2/_load.csc").arg(ScriptsRoot, Prefix))
+			<< QDir::cleanPath(QString("%1/scripts/zm/_load.gsc").arg(ContentRoot))
+			<< QDir::cleanPath(QString("%1/scripts/zm/_load.csc").arg(ContentRoot))
+			<< QDir::cleanPath(QString("%1/scripts/mp/_load.gsc").arg(ContentRoot))
+			<< QDir::cleanPath(QString("%1/scripts/mp/_load.csc").arg(ContentRoot));
+
+		if (ZoneFilePaths.isEmpty())
+			Warnings << "No mod zone files were found under zone_source.";
+	}
+
+	for (const QString& ZoneFilePath : ZoneFilePaths)
+		CheckRequiredFile(ZoneFilePath, QString("zone file (%1)").arg(QFileInfo(ZoneFilePath).fileName()));
+
+	bool FoundAnyEntrypoint = false;
+	for (const QString& EntryPoint : PrimaryEntrypoints)
+	{
+		if (QFileInfo(EntryPoint).isFile())
+		{
+			FoundAnyEntrypoint = true;
+			Findings << QString("Found script entrypoint: %1").arg(QDir::toNativeSeparators(EntryPoint));
+		}
+	}
+	if (!FoundAnyEntrypoint)
+		Warnings << "No expected script entrypoint files were found.";
+	if (!UpdateAnalyzeProgress(3, QString("Scanning scripts for '%1'...").arg(TitleName)))
+		return;
+
+	QHash<QString, QString> LocalScripts;
+	QHash<QString, QString> LocalUiFiles;
+	QHash<QString, QString> LocalLuaFiles;
+	QHash<QString, QString> LocalGamedataFiles;
+	QHash<QString, QSet<QString>> NamespaceUsagesByScript;
+	QHash<QString, QSet<QString>> UsingNamespacesByScript;
+	QHash<QString, QSet<QString>> DeclaredNamespacesByScript;
+	QHash<QString, QStringList> ScriptUsingsByScript;
+	QMultiHash<QString, QString> LocalScriptNamespaces;
+	QStringList GscClientfields;
+	QStringList CscClientfields;
+	QHash<QString, QStringList> GscClientfieldFiles;
+	QHash<QString, QStringList> CscClientfieldFiles;
+	QStringList ReferencedScriptModules;
+	QStringList ReferencedUiModules;
+	QMultiHash<QString, QString> ScriptReferenceSources;
+	QMultiHash<QString, QString> UiReferenceSources;
+	QStringList WeaponTableLoads;
+	if (QDir(ScriptsRoot).exists())
+	{
+		QDirIterator It(ScriptsRoot, QStringList() << "*.gsc" << "*.csc" << "*.gsh", QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString ScriptPath = It.next();
+			const QString RelativePath = NormalizeScriptAssetPath(QString("scripts/%1").arg(QDir(ScriptsRoot).relativeFilePath(ScriptPath)));
+			LocalScripts.insert(RelativePath, ScriptPath);
+
+			QFile ScriptFile(ScriptPath);
+			if (!ScriptFile.open(QIODevice::ReadOnly))
+			{
+				Warnings << QString("Unable to read script file: %1").arg(QDir::toNativeSeparators(ScriptPath));
+				continue;
+			}
+
+			const QString Text = QString::fromUtf8(ScriptFile.readAll());
+			const QString SanitizedText = StripScriptComments(Text);
+			const QStringList ScriptUsings = ExtractScriptUsings(Text);
+			ReferencedScriptModules.append(ScriptUsings);
+			ScriptUsingsByScript.insert(RelativePath, ScriptUsings);
+			const QString CurrentExtension = QFileInfo(RelativePath).suffix().toLower();
+			for (const QString& ScriptUsing : ScriptUsings)
+			{
+				if (CurrentExtension == "gsc")
+					ScriptReferenceSources.insert(NormalizeScriptAssetPath(ScriptUsing + ".gsc"), RelativePath);
+				else if (CurrentExtension == "csc")
+					ScriptReferenceSources.insert(NormalizeScriptAssetPath(ScriptUsing + ".csc"), RelativePath);
+				else if (CurrentExtension == "gsh")
+					ScriptReferenceSources.insert(NormalizeScriptAssetPath(ScriptUsing + ".gsh"), RelativePath);
+				else
+					ScriptReferenceSources.insert(ScriptUsing, RelativePath);
+			}
+			WeaponTableLoads.append(ExtractWeaponTableLoads(SanitizedText));
+			QSet<QString> UsingNamespaces;
+			for (const QString& UsingPath : ScriptUsings)
+			{
+				const QString UsingBase = QFileInfo(UsingPath).baseName().toLower();
+				if (!UsingBase.isEmpty())
+					UsingNamespaces.insert(UsingBase);
+				const QString GscUsingPath = NormalizeScriptAssetPath(UsingPath + ".gsc");
+				const QString CscUsingPath = NormalizeScriptAssetPath(UsingPath + ".csc");
+				const QString GshUsingPath = NormalizeScriptAssetPath(UsingPath + ".gsh");
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(GscUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(CscUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(GshUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(GscUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(CscUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(GshUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+			}
+			UsingNamespacesByScript.insert(RelativePath, UsingNamespaces);
+			QSet<QString> NamespaceUsages;
+			for (const QString& NamespaceName : ExtractNamespaceUsages(SanitizedText))
+				NamespaceUsages.insert(NamespaceName);
+			NamespaceUsagesByScript.insert(RelativePath, NamespaceUsages);
+			QSet<QString> DeclaredNamespaces;
+			for (const QString& NamespaceName : ExtractDeclaredNamespaces(SanitizedText))
+			{
+				LocalScriptNamespaces.insert(NamespaceName, RelativePath);
+				DeclaredNamespaces.insert(NamespaceName);
+			}
+			DeclaredNamespacesByScript.insert(RelativePath, DeclaredNamespaces);
+			if (RelativePath.endsWith(".gsc"))
+			{
+				const QStringList Fields = ExtractClientfieldRegistrations(SanitizedText);
+				GscClientfields.append(Fields);
+				for (const QString& Field : Fields)
+					GscClientfieldFiles[Field].append(ScriptPath);
+			}
+			if (RelativePath.endsWith(".csc"))
+			{
+				const QStringList Fields = ExtractClientfieldRegistrations(SanitizedText);
+				CscClientfields.append(Fields);
+				for (const QString& Field : Fields)
+					CscClientfieldFiles[Field].append(ScriptPath);
+			}
+		}
+	}
+	if (QDir(UiRoot).exists())
+	{
+		for (auto UsingIt = ScriptUsingsByScript.constBegin(); UsingIt != ScriptUsingsByScript.constEnd(); ++UsingIt)
+		{
+			QSet<QString> UsingNamespaces = UsingNamespacesByScript.value(UsingIt.key());
+			for (const QString& UsingPath : UsingIt.value())
+			{
+				const QString GscUsingPath = NormalizeScriptAssetPath(UsingPath + ".gsc");
+				const QString CscUsingPath = NormalizeScriptAssetPath(UsingPath + ".csc");
+				const QString GshUsingPath = NormalizeScriptAssetPath(UsingPath + ".gsh");
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(GscUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(CscUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DeclaredNamespacesByScript.value(GshUsingPath))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(GscUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(CscUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+				for (const QString& NamespaceName : DefaultNamespacesByScriptPath.value(SharedScriptAssetPath(GshUsingPath)))
+					UsingNamespaces.insert(NamespaceName);
+			}
+			UsingNamespacesByScript.insert(UsingIt.key(), UsingNamespaces);
+		}
+
+		QDirIterator It(UiRoot, QStringList() << "*.lua" << "*.luac" << "*.menu", QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString FilePath = It.next();
+			const QString RelativePath = NormalizeScriptAssetPath(QString("ui/%1").arg(QDir(UiRoot).relativeFilePath(FilePath)));
+			LocalUiFiles.insert(RelativePath, FilePath);
+
+			QFile File(FilePath);
+			if (!File.open(QIODevice::ReadOnly))
+			{
+				Warnings << QString("Unable to read UI file: %1").arg(QDir::toNativeSeparators(FilePath));
+				continue;
+			}
+
+			const QStringList Modules = ExtractUiRequireModules(StripScriptComments(QString::fromUtf8(File.readAll())));
+			ReferencedUiModules.append(Modules);
+			for (const QString& ModuleName : Modules)
+			{
+				const QString RawfilePath = LuaModuleToRawfilePath(ModuleName);
+				if (!RawfilePath.isEmpty())
+					UiReferenceSources.insert(RawfilePath, RelativePath);
+			}
+		}
+	}
+	if (QDir(LuaRoot).exists())
+	{
+		QDirIterator It(LuaRoot, QStringList() << "*.lua" << "*.luac", QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString FilePath = It.next();
+			const QString RelativePath = NormalizeScriptAssetPath(QString("lua/%1").arg(QDir(LuaRoot).relativeFilePath(FilePath)));
+			LocalLuaFiles.insert(RelativePath, FilePath);
+		}
+	}
+	if (QDir(GamedataRoot).exists())
+	{
+		QDirIterator It(GamedataRoot, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+		while (It.hasNext())
+		{
+			const QString FilePath = It.next();
+			const QString RelativePath = NormalizeScriptAssetPath(QString("gamedata/%1").arg(QDir(GamedataRoot).relativeFilePath(FilePath)));
+			LocalGamedataFiles.insert(RelativePath, FilePath);
+		}
+	}
+
+	if (LocalScripts.isEmpty())
+		Warnings << QString("No local scripts were found under %1.").arg(QDir::toNativeSeparators(ScriptsRoot));
+	else
+		Findings << QString("Found %1 local script files.").arg(LocalScripts.count());
+	if (!LocalUiFiles.isEmpty())
+		Findings << QString("Found %1 local UI files.").arg(LocalUiFiles.count());
+	if (!LocalLuaFiles.isEmpty())
+		Findings << QString("Found %1 local Lua files.").arg(LocalLuaFiles.count());
+	if (!LocalGamedataFiles.isEmpty())
+		Findings << QString("Found %1 local gamedata files.").arg(LocalGamedataFiles.count());
+	if (!UpdateAnalyzeProgress(4, QString("Reading zone files for '%1'...").arg(TitleName)))
+		return;
+
+	QSet<QString> ZoneScriptEntries;
+	QSet<QString> CommentedZoneScriptEntries;
+	QSet<QString> ZoneRawfileEntries;
+	QSet<QString> ZoneStringTableEntries;
+	QHash<QString, QSet<QString>> ZoneRawfilesByZone;
+	bool HasAnyZoneScriptEntries = false;
+	for (const QString& ZoneFilePath : ZoneFilePaths)
+	{
+		QFile ZoneFile(ZoneFilePath);
+		if (!ZoneFile.open(QIODevice::ReadOnly))
+			continue;
+
+		const QString ZoneText = QString::fromUtf8(ZoneFile.readAll());
+		const QString ZoneName = QFileInfo(ZoneFilePath).completeBaseName();
+		const QStringList ScriptEntries = ExtractZoneScriptEntries(ZoneText);
+		const QStringList CommentedScriptEntries = ExtractCommentedZoneEntriesForType(ZoneText, "scriptparsetree");
+		const QStringList RawfileEntries = ExtractZoneEntriesForType(ZoneText, "rawfile");
+		const QStringList StringTableEntries = ExtractZoneEntriesForType(ZoneText, "stringtable");
+		const QStringList FxEntries = ExtractZoneEntriesForType(ZoneText, "fx");
+		const QStringList ImageEntries = ExtractZoneEntriesForType(ZoneText, "image");
+		const QStringList XModelEntries = ExtractZoneEntriesForType(ZoneText, "xmodel");
+
+		HasAnyZoneScriptEntries |= !ScriptEntries.isEmpty();
+		for (const QString& Entry : ScriptEntries)
+			ZoneScriptEntries.insert(Entry);
+		for (const QString& Entry : CommentedScriptEntries)
+			CommentedZoneScriptEntries.insert(Entry);
+		for (const QString& Entry : RawfileEntries)
+		{
+			ZoneRawfileEntries.insert(Entry);
+			ZoneRawfilesByZone[ZoneName].insert(Entry);
+		}
+		for (const QString& Entry : StringTableEntries)
+			ZoneStringTableEntries.insert(Entry);
+
+		Findings << QString("Zone %1 references %2 scripts, %3 rawfiles, %4 stringtables, %5 fx, %6 images, %7 xmodels.")
+			.arg(ZoneName)
+			.arg(ScriptEntries.count())
+			.arg(RawfileEntries.count())
+			.arg(StringTableEntries.count())
+			.arg(FxEntries.count())
+			.arg(ImageEntries.count())
+			.arg(XModelEntries.count());
+	}
+	if (!HasAnyZoneScriptEntries)
+		Warnings << "No scriptparsetree entries were found in the available zone files.";
+	if (!UpdateAnalyzeProgress(5, QString("Matching custom scripts and assets for '%1'...").arg(TitleName)))
+		return;
+
+	for (auto It = LocalScripts.constBegin(); It != LocalScripts.constEnd(); ++It)
+	{
+		const QString SharedPath = SharedScriptAssetPath(It.key());
+		const bool IsSharedDefaultOverride = DefaultScriptsManifest.contains(SharedPath);
+		const bool IsCommentedOutInZone = CommentedZoneScriptEntries.contains(It.key());
+		if ((It.key().endsWith(".gsc") || It.key().endsWith(".csc")) && !ZoneScriptEntries.contains(It.key()) && !IsSharedDefaultOverride && !IsCommentedOutInZone)
+			Warnings << QString("Local script is not listed in any zone file: %1").arg(It.key());
+	}
+
+	QSet<QString> MissingScriptModules;
+	auto DescribeScriptReferenceSources = [&](const QString& ReferencedAssetPath) -> QString
+	{
+		QStringList Sources = ScriptReferenceSources.values(ReferencedAssetPath);
+		Sources.removeDuplicates();
+		Sources.sort();
+		return Sources.join(", ");
+	};
+	for (const QString& ReferencedModule : ReferencedScriptModules)
+	{
+		const QString GscModule = NormalizeScriptAssetPath(ReferencedModule + ".gsc");
+		const QString CscModule = NormalizeScriptAssetPath(ReferencedModule + ".csc");
+		const QString GshModule = NormalizeScriptAssetPath(ReferencedModule + ".gsh");
+		const bool ExistsLocally = LocalScripts.contains(GscModule) || LocalScripts.contains(CscModule) || LocalScripts.contains(GshModule);
+		if (ExistsLocally)
+		{
+			const bool IsDefaultGsc = DefaultScriptsManifest.contains(SharedScriptAssetPath(GscModule));
+			const bool IsDefaultCsc = DefaultScriptsManifest.contains(SharedScriptAssetPath(CscModule));
+			const bool IsDefaultGsh = DefaultScriptsManifest.contains(SharedScriptAssetPath(GshModule));
+			if (LocalScripts.contains(GscModule) && !ZoneScriptEntries.contains(GscModule) && !IsDefaultGsc)
+				Warnings << QString("#using references %1 but it is missing from the zone files (referenced by %2)").arg(GscModule, DescribeScriptReferenceSources(GscModule));
+			if (LocalScripts.contains(CscModule) && !ZoneScriptEntries.contains(CscModule) && !IsDefaultCsc)
+				Warnings << QString("#using references %1 but it is missing from the zone files (referenced by %2)").arg(CscModule, DescribeScriptReferenceSources(CscModule));
+			if (LocalScripts.contains(GshModule) && !ZoneScriptEntries.contains(GshModule) && !IsDefaultGsh)
+				Warnings << QString("#using references %1 but it is missing from the zone files (referenced by %2)").arg(GshModule, DescribeScriptReferenceSources(GshModule));
+			continue;
+		}
+
+		const QString GscSource = AssetSourceLabel(GscModule);
+		const QString CscSource = AssetSourceLabel(CscModule);
+		const QString GshSource = AssetSourceLabel(GshModule);
+		if (GscSource == "unsafe-global" || CscSource == "unsafe-global" || GshSource == "unsafe-global")
+			Warnings << QString("#using resolves through global raw/ instead of the map/mod folder or shared defaults: %1").arg(ReferencedModule);
+		if (GscSource == "missing" && CscSource == "missing" && GshSource == "missing")
+			MissingScriptModules.insert(ReferencedModule);
+	}
+	for (const QString& MissingModule : MissingScriptModules)
+		Warnings << QString("#using points to a script that was not found locally or in shared defaults: %1").arg(MissingModule);
+	for (auto It = NamespaceUsagesByScript.constBegin(); It != NamespaceUsagesByScript.constEnd(); ++It)
+	{
+		const QString ScriptPath = It.key();
+		const QSet<QString> UsingNamespaces = UsingNamespacesByScript.value(ScriptPath);
+		const QSet<QString> DeclaredNamespaces = DeclaredNamespacesByScript.value(ScriptPath);
+		const QString ScriptBaseName = QFileInfo(ScriptPath).baseName().toLower();
+		for (const QString& NamespaceName : It.value())
+		{
+			if (UsingNamespaces.contains(NamespaceName)
+				|| (NamespaceName.startsWith("_") && UsingNamespaces.contains(NamespaceName.mid(1)))
+				|| (!NamespaceName.startsWith("_") && UsingNamespaces.contains("_" + NamespaceName)))
+				continue;
+			if (DeclaredNamespaces.contains(NamespaceName)
+				|| (NamespaceName.startsWith("_") && DeclaredNamespaces.contains(NamespaceName.mid(1)))
+				|| (!NamespaceName.startsWith("_") && DeclaredNamespaces.contains("_" + NamespaceName)))
+				continue;
+			if (ScriptBaseName == NamespaceName
+				|| ScriptBaseName == ("_" + NamespaceName)
+				|| (NamespaceName.startsWith("_") && ScriptBaseName == NamespaceName.mid(1)))
+				continue;
+			if (NamespaceName == "level" || NamespaceName == "self" || NamespaceName == "world" || NamespaceName == "clientfield")
+				continue;
+
+			QStringList CandidateNamespaces;
+			CandidateNamespaces << NamespaceName;
+			if (NamespaceName.startsWith("_"))
+				CandidateNamespaces << NamespaceName.mid(1);
+			else
+				CandidateNamespaces << ("_" + NamespaceName);
+			CandidateNamespaces.removeDuplicates();
+
+			bool ResolvedByDefaultNamespace = false;
+			for (const QString& CandidateNamespace : CandidateNamespaces)
+			{
+				if (DefaultScriptNamespaces.contains(CandidateNamespace))
+				{
+					ResolvedByDefaultNamespace = true;
+					break;
+				}
+			}
+			if (ResolvedByDefaultNamespace)
+				continue;
+
+			bool NamespaceResolvable = false;
+			for (auto LocalIt = LocalScripts.constBegin(); LocalIt != LocalScripts.constEnd(); ++LocalIt)
+			{
+				if (QFileInfo(LocalIt.key()).baseName().compare(NamespaceName, Qt::CaseInsensitive) == 0)
+				{
+					NamespaceResolvable = true;
+					break;
+				}
+			}
+
+			if (!NamespaceResolvable)
+			{
+				for (const QString& CandidateNamespace : CandidateNamespaces)
+				{
+					if (LocalScriptNamespaces.contains(CandidateNamespace))
+					{
+						NamespaceResolvable = true;
+						break;
+					}
+					if (DefaultScriptNamespaces.contains(CandidateNamespace))
+						continue;
+
+					const QString NamespaceGsc = QString("scripts/zm/%1.gsc").arg(CandidateNamespace);
+					const QString NamespaceCsc = QString("scripts/zm/%1.csc").arg(CandidateNamespace);
+					const QString GenericNamespaceGsc = QString("scripts/%1.gsc").arg(CandidateNamespace);
+					const QString GenericNamespaceCsc = QString("scripts/%1.csc").arg(CandidateNamespace);
+					if (AssetSourceLabel(NamespaceGsc) != "missing" || AssetSourceLabel(NamespaceCsc) != "missing"
+						|| AssetSourceLabel(GenericNamespaceGsc) != "missing" || AssetSourceLabel(GenericNamespaceCsc) != "missing")
+					{
+						NamespaceResolvable = true;
+						break;
+					}
+				}
+			}
+
+			if (NamespaceResolvable)
+				Warnings << QString("Script uses namespace '%1::' without a matching #using in %2").arg(NamespaceName, ScriptPath);
+		}
+	}
+	if (!UpdateAnalyzeProgress(6, QString("Checking UI, clientfields, and build state for '%1'...").arg(TitleName)))
+		return;
+
+	for (const QString& ModuleName : ReferencedUiModules)
+	{
+		const QString RawfilePath = LuaModuleToRawfilePath(ModuleName);
+		if (RawfilePath.isEmpty())
+			continue;
+
+		QStringList ParentSources = UiReferenceSources.values(RawfilePath);
+		ParentSources.removeDuplicates();
+		bool HasZonedParentSource = ParentSources.isEmpty();
+		for (const QString& ParentSource : ParentSources)
+		{
+			if (ZoneContainsRawfilePath(ZoneRawfileEntries, ParentSource))
+			{
+				HasZonedParentSource = true;
+				break;
+			}
+		}
+		if (!HasZonedParentSource)
+			continue;
+
+		const QString SourceLabel = AssetSourceLabel(RawfilePath);
+		if (HashContainsPathVariant(LocalUiFiles, RawfilePath) || HashContainsPathVariant(LocalLuaFiles, RawfilePath))
+		{
+			if (!ZoneContainsRawfilePath(ZoneRawfileEntries, RawfilePath))
+				Warnings << QString("Custom UI/Lua file is required but not added as rawfile in a zone: %1").arg(RawfilePath);
+		}
+		else if (SourceLabel == "unsafe-global")
+		{
+			Warnings << QString("UI/Lua module is being loaded from global raw/ instead of the map/mod folder or shared defaults: %1").arg(RawfilePath);
+		}
+		else if (SourceLabel == "missing")
+		{
+			Warnings << QString("Required UI/Lua module was not found locally or in shared defaults: %1").arg(RawfilePath);
+		}
+	}
+
+	QSet<QString> GscClientfieldSet;
+	QSet<QString> CscClientfieldSet;
+	for (const QString& Field : GscClientfields)
+		GscClientfieldSet.insert(Field);
+	for (const QString& Field : CscClientfields)
+		CscClientfieldSet.insert(Field);
+	if (!GscClientfieldSet.isEmpty() || !CscClientfieldSet.isEmpty())
+		Findings << QString("Clientfield registrations found: %1 in .gsc, %2 in .csc").arg(GscClientfieldSet.count()).arg(CscClientfieldSet.count());
+
+	auto MakeSelectLink = [](const QString& FilePath) -> QString
+	{
+		return QString(" [[select:%1|Open folder]]").arg(QDir::toNativeSeparators(QFileInfo(FilePath).absolutePath()));
+	};
+	auto DescribeClientfieldFiles = [&](const QHash<QString, QStringList>& FieldFiles, const QString& FieldName) -> QString
+	{
+		QStringList Details;
+		const QStringList Files = FieldFiles.value(FieldName);
+		for (const QString& FilePath : Files)
+			Details << QString("%1%2").arg(QFileInfo(FilePath).fileName(), MakeSelectLink(FilePath));
+		return Details.join(", ");
+	};
+
+	for (const QString& Field : GscClientfieldSet)
+	{
+		if (!CscClientfieldSet.contains(Field))
+			Warnings << QString("Clientfield registered in .gsc but not .csc: %1 (%2)").arg(Field, DescribeClientfieldFiles(GscClientfieldFiles, Field));
+	}
+	for (const QString& Field : CscClientfieldSet)
+	{
+		if (!GscClientfieldSet.contains(Field))
+			Warnings << QString("Clientfield registered in .csc but not .gsc: %1 (%2)").arg(Field, DescribeClientfieldFiles(CscClientfieldFiles, Field));
+	}
+
+	const QStringList BuiltLanguages = DetectBuiltLanguages(ContentRoot);
+	if (BuiltLanguages.isEmpty())
+		Warnings << "No built localized output folders were found.";
+	else if (HasOnlyEnglishBuild(ContentRoot))
+	{
+		Findings << QString("Built language folders: %1").arg(BuiltLanguages.join(", "));
+		Warnings << "Only english is built. Build the rest of the localized languages too.";
+	}
+	else
+		Findings << QString("Built language folders: %1").arg(BuiltLanguages.join(", "));
+
+	if (QDir(ZoneOutputRoot).exists())
+	{
+		QStringList BuiltFastfiles = QDir(ZoneOutputRoot).entryList(QStringList() << "*.ff", QDir::Files);
+		QStringList BuiltXpaks = QDir(ZoneOutputRoot).entryList(QStringList() << "*.xpak", QDir::Files);
+		Findings << QString("Built outputs in zone/: %1 fastfiles, %2 xpaks").arg(BuiltFastfiles.count()).arg(BuiltXpaks.count());
+		if (BuiltFastfiles.isEmpty())
+			Warnings << "No .ff files were found in the zone output folder.";
+	}
+	else
+	{
+		Warnings << QString("Missing zone output folder: %1").arg(QDir::toNativeSeparators(ZoneOutputRoot));
+	}
+
+	if (!ZoneRawfileEntries.isEmpty())
+	{
+		for (const QString& RawfileEntry : ZoneRawfileEntries)
+		{
+			if (RawfileEntry.endsWith(".cfg", Qt::CaseInsensitive))
+				continue;
+			const QString SourceLabel = AssetSourceLabel(RawfileEntry);
+			if (SourceLabel == "missing")
+				Warnings << QString("Zone references missing rawfile: %1").arg(RawfileEntry);
+			else if (SourceLabel == "unsafe-global")
+				Warnings << QString("Zone rawfile resolves through global raw/ instead of the map/mod folder or shared defaults: %1").arg(RawfileEntry);
+		}
+	}
+
+	for (auto It = LocalUiFiles.constBegin(); It != LocalUiFiles.constEnd(); ++It)
+	{
+		if (!ZoneContainsRawfilePath(ZoneRawfileEntries, It.key()))
+		{
+			if (ManifestContainsUiAsset(DefaultUiManifest, It.key()))
+				Warnings << QString("Local UI override exists in the project but appears unused because it is not zoned. Remove it if unused: %1").arg(It.key());
+			else
+				Warnings << QString("Custom UI file exists in the project but is not added as a rawfile in any zone: %1").arg(It.key());
+		}
+	}
+	for (auto It = LocalGamedataFiles.constBegin(); It != LocalGamedataFiles.constEnd(); ++It)
+	{
+		if (It.key().endsWith(".csv") && !ZoneStringTableEntries.contains(It.key()) && !ZoneRawfileEntries.contains(It.key()))
+			Warnings << QString("Local gamedata file exists in the project but appears unused because it is not zoned: %1").arg(It.key());
+	}
+
+	bool UsesDefaultLevelcommonName = false;
+	for (const QString& WeaponTablePath : WeaponTableLoads)
+	{
+		if (WeaponTablePath == "gamedata/weapons/zm/zm_levelcommon_weapons.csv")
+		{
+			UsesDefaultLevelcommonName = true;
+			Warnings << "Weapon table load uses the default name 'gamedata/weapons/zm/zm_levelcommon_weapons.csv'. Use a custom file name instead.";
+		}
+		else if (WeaponTablePath.startsWith("gamedata/weapons/zm/") && QFileInfo(ContentAssetPath(WeaponTablePath)).isFile())
+			Findings << QString("Custom weapon table load found: %1").arg(WeaponTablePath);
+	}
+	if (ZoneStringTableEntries.contains("gamedata/weapons/zm/zm_levelcommon_weapons.csv"))
+	{
+		UsesDefaultLevelcommonName = true;
+		Warnings << "Zone file includes the default 'gamedata/weapons/zm/zm_levelcommon_weapons.csv'. Use a custom weapon table file name instead.";
+	}
+	if (!UsesDefaultLevelcommonName)
+	{
+		bool HasCustomWeaponTable = false;
+		for (const QString& WeaponTablePath : WeaponTableLoads)
+		{
+			if (WeaponTablePath.startsWith("gamedata/weapons/zm/") && WeaponTablePath != "gamedata/weapons/zm/zm_levelcommon_weapons.csv")
+				HasCustomWeaponTable = true;
+		}
+		if (HasCustomWeaponTable)
+			Findings << "Weapon table usage avoids the default zm_levelcommon_weapons name.";
+	}
+	if (!UpdateAnalyzeProgress(7, QString("Checking zone placement rules for '%1'...").arg(TitleName)))
+		return;
+
+	if (!IsMap)
+	{
+		const bool HasCoreZone = ZoneRawfilesByZone.contains("core_mod");
+		const bool HasZmZone = ZoneRawfilesByZone.contains("zm_mod");
+		if (HasCoreZone && HasZmZone)
+		{
+			for (auto It = LocalUiFiles.constBegin(); It != LocalUiFiles.constEnd(); ++It)
+			{
+				const QString Path = It.key();
+				const bool InCore = ZoneContainsRawfilePath(ZoneRawfilesByZone.value("core_mod"), Path);
+				const bool InZm = ZoneContainsRawfilePath(ZoneRawfilesByZone.value("zm_mod"), Path);
+				const QString LowerPath = Path.toLower();
+				const bool LooksLikeLobbyFrontend = LowerPath.contains("/lobby/") || LowerPath.contains("frontend");
+				const bool LooksLikePauseMenu = LowerPath.contains("startmenu") || LowerPath.contains("pause") || LowerPath.contains("saveandquit");
+				if (LooksLikeLobbyFrontend && !LooksLikePauseMenu && InZm && !InCore)
+					Warnings << QString("Lobby/frontend UI file is only in zm_mod. It likely belongs in core_mod: %1").arg(Path);
+				if ((LowerPath.contains("/hud/") || LowerPath.contains("zmhud") || LowerPath.contains("waypoint")) && InCore && !InZm)
+					Warnings << QString("In-game HUD UI file is only in core_mod. It likely belongs in zm_mod: %1").arg(Path);
+			}
+		}
+	}
+
+	if (Warnings.isEmpty())
+		Findings << QString("No obvious %1 issues were found.").arg(IsMap ? "map" : "mod");
+	if (!UpdateAnalyzeProgress(8, QString("Finalizing analysis for '%1'...").arg(TitleName)))
+		return;
+
+	ProgressDialog.close();
+	ShowAnalysisResults(QString("Analyze %1: %2").arg(IsMap ? "Map" : "Mod", TitleName), Findings, Warnings);
+}
+
+void mlMainWindow::ShowAnalysisResults(const QString& Title, const QStringList& Findings, const QStringList& Warnings) const
+{
+	QDialog Dialog(const_cast<mlMainWindow*>(this), Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+	Dialog.setWindowTitle(Title);
+	Dialog.resize(920, 700);
+
+	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+	QTextBrowser* Output = new QTextBrowser(&Dialog);
+	Output->setReadOnly(true);
+	Output->setOpenLinks(false);
+	Output->setOpenExternalLinks(false);
+	Output->setStyleSheet("QTextBrowser { background:#171b20; color:#d7dce2; border:1px solid #2d353d; border-radius:12px; padding:8px; }");
+
+	QStringList SuccessLines;
+	QStringList WarningLines;
+	QStringList ErrorLines;
+	auto IsErrorLine = [](const QString& Line) -> bool
+	{
+		const QString Lower = Line.toLower();
+		return Lower.startsWith("missing ")
+			|| Lower.contains(" was not found")
+			|| Lower.contains("missing from")
+			|| Lower.contains("unsafe-global")
+			|| Lower.contains("global raw/")
+			|| Lower.contains("unable to")
+			|| Lower.contains("not added")
+			|| Lower.contains("not listed")
+			|| Lower.contains("uses the default name")
+			|| Lower.contains("includes the default")
+			|| Lower.contains("does not exist");
+	};
+	auto IsWarningLine = [](const QString& Line) -> bool
+	{
+		const QString Lower = Line.toLower();
+		return Lower.contains("likely belongs")
+			|| Lower.contains("clientfield")
+			|| Lower.contains("no built")
+			|| Lower.contains("no expected")
+			|| Lower.contains("no local")
+			|| Lower.contains("no scriptparsetree")
+			|| Lower.contains("only in ");
+	};
+
+	for (const QString& Line : Findings)
+	{
+		if (!Line.trimmed().isEmpty())
+			SuccessLines << Line;
+	}
+	for (const QString& Line : Warnings)
+	{
+		if (Line.trimmed().isEmpty())
+			continue;
+		if (IsErrorLine(Line))
+			ErrorLines << Line;
+		else if (IsWarningLine(Line))
+			WarningLines << Line;
+		else
+			WarningLines << Line;
+	}
+
+	auto HtmlEscape = [](const QString& Text) -> QString { return Text.toHtmlEscaped(); };
+	auto FormatAnalysisLine = [&](const QString& Line) -> QString
+	{
+		QString Html = Line.toHtmlEscaped();
+		QRegularExpression LinkExpression("\\[\\[select:([^\\|\\]]+)\\|([^\\]]+)\\]\\]");
+		QRegularExpressionMatchIterator It = LinkExpression.globalMatch(Html);
+		while (It.hasNext())
+		{
+			const QRegularExpressionMatch Match = It.next();
+			const QString FilePath = Match.captured(1);
+			const QString Label = Match.captured(2);
+			const QString LinkHtml = QString("<a href=\"select:%1\" style=\"color:#8fc7ff;\">%2</a>")
+				.arg(QUrl::toPercentEncoding(FilePath))
+				.arg(Label.toHtmlEscaped());
+			Html.replace(Match.captured(0), LinkHtml);
+		}
+		return Html;
+	};
+	auto BuildSection = [&](const QString& Label, const QString& BadgeText, const QString& BadgeColor, const QString& BackgroundColor, const QStringList& Lines) -> QString
+	{
+		QString Html = QString(
+			"<div style='margin:0 0 14px 0; padding:14px 16px; border-radius:12px; background:%1; border:1px solid %2;'>"
+			"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>"
+			"<span style='font-size:15px; font-weight:700; color:#f4f7fb;'>%3</span>"
+			"<span style='background:%2; color:#0f1318; border-radius:999px; padding:3px 10px; font-weight:700;'>%4</span>"
+			"</div>")
+			.arg(BackgroundColor, BadgeColor, HtmlEscape(Label), HtmlEscape(BadgeText));
+
+		if (Lines.isEmpty())
+		{
+			Html += "<div style='color:#97a6b5;'>None</div></div>";
+			return Html;
+		}
+
+		Html += "<ul style='margin:0; padding-left:18px;'>";
+		for (const QString& Line : Lines)
+			Html += QString("<li style='margin:0 0 6px 0; color:#dbe3ea;'>%1</li>").arg(FormatAnalysisLine(Line));
+		Html += "</ul></div>";
+		return Html;
+	};
+
+	QString Html;
+	Html += "<html><body style='font-family:Segoe UI; background:#11161b; color:#d7dce2;'>";
+	Html += QString(
+		"<div style='margin-bottom:20px; padding:18px 20px; border-radius:12px; background:#1b222a; border:1px solid #2d353d;'>"
+		"<div style='font-size:18px; font-weight:700; color:#ffffff; margin-bottom:14px;'>Checks completed</div>"
+		"<div style='color:#9aa8b6;'>"
+		"<span style='display:inline-block; margin-right:14px; margin-bottom:8px; background:#1f5f3b; color:#d9ffe8; border-radius:999px; padding:6px 12px; font-weight:700;'>Success %1</span>"
+		"<span style='display:inline-block; margin-right:14px; margin-bottom:8px; background:#6c5520; color:#ffe9b0; border-radius:999px; padding:6px 12px; font-weight:700;'>Warnings %2</span>"
+		"<span style='display:inline-block; margin-bottom:8px; background:#6b2626; color:#ffd0d0; border-radius:999px; padding:6px 12px; font-weight:700;'>Errors %3</span>"
+		"</div></div>")
+		.arg(SuccessLines.count())
+		.arg(WarningLines.count())
+		.arg(ErrorLines.count());
+	Html += BuildSection("Success / Info", QString::number(SuccessLines.count()), "#2f9e62", "#17261d", SuccessLines);
+	Html += BuildSection("Warnings", QString::number(WarningLines.count()), "#d6a23d", "#2c2412", WarningLines);
+	Html += BuildSection("Errors", QString::number(ErrorLines.count()), "#d85c5c", "#2b1717", ErrorLines);
+	Html += "</body></html>";
+
+	Output->setHtml(Html);
+	connect(Output, &QTextBrowser::anchorClicked, &Dialog, [&](const QUrl& Url)
+	{
+		if (Url.scheme() != "select")
+			return;
+
+		QString FilePath = Url.toString();
+		if (FilePath.startsWith("select:"))
+			FilePath.remove(0, QString("select:").length());
+		FilePath = QUrl::fromPercentEncoding(FilePath.toUtf8());
+		if (FilePath.startsWith(":"))
+			FilePath.remove(0, 1);
+		if (QFileInfo(FilePath).exists())
+			QProcess::startDetached("explorer.exe", QStringList() << QDir::toNativeSeparators(FilePath));
+	});
+	Layout->addWidget(Output, 1);
+
+	QDialogButtonBox* Buttons = new QDialogButtonBox(QDialogButtonBox::Close, &Dialog);
+	connect(Buttons, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	Layout->addWidget(Buttons);
+	Dialog.exec();
 }
 
 void mlMainWindow::OnExport2BinChooseDirectory()
@@ -6402,11 +12047,11 @@ void mlMainWindow::OnExport2BinToggleOverwriteFiles()
 
 void mlMainWindow::OnToggleFavorite()
 {
-	QList<QTreeWidgetItem*> ItemList = mFileListWidget->selectedItems();
-	if (ItemList.isEmpty())
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
 		return;
 
-	ToggleFavoriteEntry(GetItemFavoriteKey(ItemList[0]));
+	ToggleFavoriteEntry(GetItemFavoriteKey(Item));
 	PopulateFileList();
 }
 
@@ -6432,7 +12077,10 @@ void mlMainWindow::FlushBuildOutput()
 		return;
 
 	QSettings Settings;
-	if (!UseImprovedConsoleStyle(Settings))
+	const bool ImprovedConsole = UseImprovedConsoleStyle(Settings);
+	const bool ShowPlainConsole = true;
+	const bool CompactPlainSpacing = ImprovedConsole;
+	if (!ImprovedConsole)
 	{
 		if (!mOutputPlainWidget)
 			return;
@@ -6440,7 +12088,7 @@ void mlMainWindow::FlushBuildOutput()
 		QScrollBar* PlainScrollBar = mOutputPlainWidget->verticalScrollBar();
 		const bool WasAtBottom = mOutputPlainAutoFollow;
 		const int PreviousScrollValue = PlainScrollBar ? PlainScrollBar->value() : 0;
-		QString OriginalOutput = Output;
+		QString OriginalOutput = BuildPlainConsoleOutput(Output, false, OutputLogTabFull);
 		if (OriginalOutput.isEmpty())
 			return;
 		mOutputPlainWidget->moveCursor(QTextCursor::End);
@@ -6463,25 +12111,12 @@ void mlMainWindow::FlushBuildOutput()
 
 	if (mOutputPlainWidget)
 	{
-		QStringList FilteredPlainLines;
-		const QStringList PlainOutputLines = Output.replace("\r", "").split('\n');
-		for (const QString& RawLine : PlainOutputLines)
-		{
-			const QString TrimmedLine = RawLine.trimmed();
-			if (TrimmedLine.isEmpty())
-				continue;
-			if (!ShouldDisplayLogOutput(Settings, TrimmedLine, mOutputTabIndex))
-				continue;
-			FilteredPlainLines.append(RawLine);
-		}
-
-		if (!FilteredPlainLines.isEmpty())
+		if (ShowPlainConsole && CompactPlainSpacing)
 		{
 			QScrollBar* PlainScrollBar = mOutputPlainWidget->verticalScrollBar();
 			const bool PlainWasAtBottom = mOutputPlainAutoFollow;
 			const int PreviousPlainScrollValue = PlainScrollBar ? PlainScrollBar->value() : 0;
-			mOutputPlainWidget->moveCursor(QTextCursor::End);
-			mOutputPlainWidget->insertPlainText(FilteredPlainLines.join("\n") + "\n");
+			mOutputPlainWidget->setPlainText(BuildPlainConsoleOutput(mOutputFullText, true, mOutputTabIndex));
 			if (PlainScrollBar)
 			{
 				if (PlainWasAtBottom)
@@ -6490,7 +12125,29 @@ void mlMainWindow::FlushBuildOutput()
 					PlainScrollBar->setValue(qMin(PreviousPlainScrollValue, PlainScrollBar->maximum()));
 			}
 		}
+		else
+		{
+			const QString PlainOutput = BuildPlainConsoleOutput(Output, false, mOutputTabIndex);
+			if (!PlainOutput.trimmed().isEmpty())
+			{
+				QScrollBar* PlainScrollBar = mOutputPlainWidget->verticalScrollBar();
+				const bool PlainWasAtBottom = mOutputPlainAutoFollow;
+				const int PreviousPlainScrollValue = PlainScrollBar ? PlainScrollBar->value() : 0;
+				mOutputPlainWidget->moveCursor(QTextCursor::End);
+				mOutputPlainWidget->insertPlainText(PlainOutput);
+				if (PlainScrollBar)
+				{
+					if (PlainWasAtBottom)
+						PlainScrollBar->setValue(PlainScrollBar->maximum());
+					else
+						PlainScrollBar->setValue(qMin(PreviousPlainScrollValue, PlainScrollBar->maximum()));
+				}
+			}
+		}
 	}
+
+	if (ShowPlainConsole)
+		return;
 
 	QScrollBar* ScrollBar = mOutputWidget->verticalScrollBar();
 	const bool WasAtBottom = mOutputTreeAutoFollow;
@@ -6501,7 +12158,6 @@ void mlMainWindow::FlushBuildOutput()
 		return;
 
 	QStringList OutputLines = NormalizedOutput.split('\n');
-	const bool ImprovedConsole = true;
 	mOutputWidget->setUpdatesEnabled(false);
 
 	for (int LineIdx = 0; LineIdx < OutputLines.count(); LineIdx++)
@@ -6521,7 +12177,8 @@ void mlMainWindow::FlushBuildOutput()
 		LogMessageKind MessageKind = DetectLogMessageKind(TrimmedLine);
 		if (IsUnrecoverableLogLine(TrimmedLine))
 			MessageKind = LogMessageError;
-		const QColor OutputColor = ColorForLogMessageKind(Settings, MessageKind);
+		Q_UNUSED(MessageKind);
+		const QColor OutputColor = ColorForLogMessageKind(Settings, LogMessageDefault);
 
 		if (StartsNewBlock)
 		{
@@ -6531,7 +12188,7 @@ void mlMainWindow::FlushBuildOutput()
 				SpacerItem->setData(0, ML_LOG_TEXT_ROLE, QString());
 				SpacerItem->setData(0, ML_LOG_IS_HEADER_ROLE, false);
 				SpacerItem->setFlags(SpacerItem->flags() & ~Qt::ItemIsSelectable);
-				SpacerItem->setSizeHint(0, QSize(0, 10));
+				SpacerItem->setSizeHint(0, QSize(0, 0));
 				QWidget* SpacerWidget = new QWidget(mOutputWidget);
 				SpacerWidget->setStyleSheet("background: transparent;");
 				mOutputWidget->setItemWidget(SpacerItem, 0, SpacerWidget);
@@ -6541,63 +12198,19 @@ void mlMainWindow::FlushBuildOutput()
 			mCurrentOutputBlockItem->setData(0, ML_LOG_TEXT_ROLE, ImprovedConsole ? TrimmedLine : RawLine);
 			mCurrentOutputBlockItem->setData(0, ML_LOG_IS_HEADER_ROLE, true);
 			mCurrentOutputBlockItem->setData(0, ML_LOG_EXPANDED_ROLE, ImprovedConsole);
+			mCurrentOutputBlockItem->setData(0, ML_LOG_TEXT_COLOR_ROLE, OutputColor);
 			mCurrentOutputBlockItem->setSizeHint(0, QSize(0, LogBlockWidgetHeight(mCurrentOutputBlockItem->data(0, ML_LOG_TEXT_ROLE).toString(), ImprovedConsole)));
 			mCurrentOutputBlockItem->setExpanded(ImprovedConsole);
 
-				const QColor BackgroundColor = ImprovedConsole
-					? OutputBlockBackgroundColor(mThemeMode, MessageKind, mOutputBlockCounter++)
+			const QColor BackgroundColor = ImprovedConsole
+				? OutputBlockBackgroundColor(mThemeMode, LogMessageDefault, mOutputBlockCounter).lighter(125)
 				: QColor(0, 0, 0, 0);
+			mOutputBlockCounter++;
+			mCurrentOutputBlockItem->setData(0, ML_LOG_BG_COLOR_ROLE, BackgroundColor);
 			mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 0, CreateLogBlockWidget(mOutputWidget, mCurrentOutputBlockItem->data(0, ML_LOG_TEXT_ROLE).toString(), OutputColor, BackgroundColor, ImprovedConsole));
+			mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 1, CreateLogBlockActionWidget(mOutputWidget, mCurrentOutputBlockItem));
 
-			if (ImprovedConsole)
-			{
-				QWidget* ActionWidget = new QWidget(mOutputWidget);
-				ActionWidget->setStyleSheet("background: transparent;");
-				QHBoxLayout* ActionLayout = new QHBoxLayout(ActionWidget);
-				ActionLayout->setContentsMargins(0, 0, 4, 0);
-				ActionLayout->setSpacing(2);
-				QToolButton* CopyButton = new QToolButton(ActionWidget);
-				CopyButton->setText(QString::fromUtf8("\xE2\xA7\x89"));
-				CopyButton->setToolTip("Copy block");
-				CopyButton->setAutoRaise(true);
-				CopyButton->setCursor(Qt::PointingHandCursor);
-				CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #98a1aa; font-size: 12px; font-weight: 600;");
-				ActionLayout->addWidget(CopyButton);
-				QToolButton* ChevronButton = new QToolButton(ActionWidget);
-				ChevronButton->setText(QString::fromUtf8("\xE2\x8C\x84"));
-				ChevronButton->setToolTip("Collapse block");
-				ChevronButton->setAutoRaise(true);
-				ChevronButton->setCursor(Qt::PointingHandCursor);
-				ChevronButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #c9d0d7; font-size: 11px; font-weight: 600;");
-				QTreeWidgetItem* HeaderItem = mCurrentOutputBlockItem;
-				connect(CopyButton, &QToolButton::clicked, this, [=]()
-				{
-					QApplication::clipboard()->setText(LogBlockText(HeaderItem));
-					CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #6ee7a8; font-size: 12px; font-weight: 600;");
-					QTimer::singleShot(1100, CopyButton, [CopyButton]()
-					{
-						if (CopyButton)
-							CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #98a1aa; font-size: 12px; font-weight: 600;");
-					});
-				});
-				connect(ChevronButton, &QToolButton::clicked, this, [=]()
-				{
-					QSettings Settings;
-					const bool Expanded = HeaderItem->isExpanded();
-					HeaderItem->setExpanded(!Expanded);
-					HeaderItem->setData(0, ML_LOG_EXPANDED_ROLE, !Expanded);
-					HeaderItem->setSizeHint(0, QSize(0, LogBlockWidgetHeight(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString(), !Expanded)));
-					ChevronButton->setText(Expanded ? QString::fromUtf8("\xE2\x80\xBA") : QString::fromUtf8("\xE2\x8C\x84"));
-					ChevronButton->setToolTip(Expanded ? "Expand block" : "Collapse block");
-					LogMessageKind HeaderKind = DetectLogMessageKind(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString());
-					if (IsUnrecoverableLogLine(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString()))
-						HeaderKind = LogMessageError;
-						UpdateLogBlockWidget(mOutputWidget->itemWidget(HeaderItem, 0), HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString(), ColorForLogMessageKind(Settings, HeaderKind), OutputBlockBackgroundColor(mThemeMode, HeaderKind, qMax(0, mOutputBlockCounter - 1)), !Expanded);
-					mOutputWidget->doItemsLayout();
-				});
-				ActionLayout->addWidget(ChevronButton);
-				mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 1, ActionWidget);
-			}
+			Q_UNUSED(ImprovedConsole);
 			continue;
 		}
 
@@ -6613,10 +12226,12 @@ void mlMainWindow::FlushBuildOutput()
 		LogMessageKind HeaderKind = DetectLogMessageKind(BlockText);
 		if (IsUnrecoverableLogLine(BlockText))
 			HeaderKind = LogMessageError;
-			const QColor BackgroundColor = ImprovedConsole
-				? OutputBlockBackgroundColor(mThemeMode, HeaderKind, qMax(0, mOutputBlockCounter - 1))
-			: QColor(0, 0, 0, 0);
-		UpdateLogBlockWidget(mOutputWidget->itemWidget(mCurrentOutputBlockItem, 0), BlockText, ColorForLogMessageKind(Settings, HeaderKind), BackgroundColor, mCurrentOutputBlockItem->data(0, ML_LOG_EXPANDED_ROLE).toBool());
+		Q_UNUSED(HeaderKind);
+		const QColor BackgroundColor = QColor(0, 0, 0, 0);
+		const QColor HeaderColor = ColorForLogMessageKind(Settings, LogMessageDefault);
+		mCurrentOutputBlockItem->setData(0, ML_LOG_TEXT_COLOR_ROLE, HeaderColor);
+		mCurrentOutputBlockItem->setData(0, ML_LOG_BG_COLOR_ROLE, BackgroundColor);
+		UpdateLogBlockWidget(mOutputWidget->itemWidget(mCurrentOutputBlockItem, 0), BlockText, HeaderColor, BackgroundColor, mCurrentOutputBlockItem->data(0, ML_LOG_EXPANDED_ROLE).toBool());
 	}
 	mOutputWidget->setUpdatesEnabled(true);
 
@@ -6637,6 +12252,7 @@ void mlMainWindow::BuildFinished()
 	mBuildThread = NULL;
 	mConvertThread = NULL;
 	ResetBuildButtons();
+	UpdateGameRunningState();
 
 	if (FinishedBuildThread)
 		FinishedBuildThread->deleteLater();
@@ -6656,7 +12272,7 @@ void mlMainWindow::AppendOutputBlock(const QString& BlockText, const QSettings& 
 		SpacerItem->setData(0, ML_LOG_TEXT_ROLE, QString());
 		SpacerItem->setData(0, ML_LOG_IS_HEADER_ROLE, false);
 		SpacerItem->setFlags(SpacerItem->flags() & ~Qt::ItemIsSelectable);
-		SpacerItem->setSizeHint(0, QSize(0, 10));
+		SpacerItem->setSizeHint(0, QSize(0, 0));
 		QWidget* SpacerWidget = new QWidget(mOutputWidget);
 		SpacerWidget->setStyleSheet("background: transparent;");
 		mOutputWidget->setItemWidget(SpacerItem, 0, SpacerWidget);
@@ -6665,87 +12281,41 @@ void mlMainWindow::AppendOutputBlock(const QString& BlockText, const QSettings& 
 	LogMessageKind HeaderKind = DetectLogMessageKind(BlockText);
 	if (IsUnrecoverableLogLine(BlockText))
 		HeaderKind = LogMessageError;
-	const QColor OutputColor = ColorForLogMessageKind(Settings, HeaderKind);
-	const QColor BackgroundColor = OutputBlockBackgroundColor(mThemeMode, HeaderKind, mOutputBlockCounter++);
+	Q_UNUSED(HeaderKind);
+	const QColor OutputColor = ColorForLogMessageKind(Settings, LogMessageDefault);
+	const QColor BackgroundColor = OutputBlockBackgroundColor(mThemeMode, LogMessageDefault, mOutputBlockCounter).lighter(125);
+	mOutputBlockCounter++;
 
 	mCurrentOutputBlockItem = new QTreeWidgetItem(mOutputWidget);
 	mCurrentOutputBlockItem->setData(0, ML_LOG_TEXT_ROLE, BlockText);
 	mCurrentOutputBlockItem->setData(0, ML_LOG_IS_HEADER_ROLE, true);
 	mCurrentOutputBlockItem->setData(0, ML_LOG_EXPANDED_ROLE, true);
+	mCurrentOutputBlockItem->setData(0, ML_LOG_TEXT_COLOR_ROLE, OutputColor);
+	mCurrentOutputBlockItem->setData(0, ML_LOG_BG_COLOR_ROLE, BackgroundColor);
 	mCurrentOutputBlockItem->setSizeHint(0, QSize(0, LogBlockWidgetHeight(BlockText, true)));
 	mCurrentOutputBlockItem->setExpanded(true);
 	mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 0, CreateLogBlockWidget(mOutputWidget, BlockText, OutputColor, BackgroundColor, true));
+	mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 1, CreateLogBlockActionWidget(mOutputWidget, mCurrentOutputBlockItem));
 
-	QWidget* ActionWidget = new QWidget(mOutputWidget);
-	ActionWidget->setStyleSheet("background: transparent;");
-	QHBoxLayout* ActionLayout = new QHBoxLayout(ActionWidget);
-	ActionLayout->setContentsMargins(0, 0, 4, 0);
-	ActionLayout->setSpacing(2);
-	QToolButton* CopyButton = new QToolButton(ActionWidget);
-	CopyButton->setText(QString::fromUtf8("\xE2\xA7\x89"));
-	CopyButton->setToolTip("Copy block");
-	CopyButton->setAutoRaise(true);
-	CopyButton->setCursor(Qt::PointingHandCursor);
-	CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #98a1aa; font-size: 12px; font-weight: 600;");
-	ActionLayout->addWidget(CopyButton);
-	QToolButton* ChevronButton = new QToolButton(ActionWidget);
-	ChevronButton->setText(QString::fromUtf8("\xE2\x8C\x84"));
-	ChevronButton->setToolTip("Collapse block");
-	ChevronButton->setAutoRaise(true);
-	ChevronButton->setCursor(Qt::PointingHandCursor);
-	ChevronButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #c9d0d7; font-size: 11px; font-weight: 600;");
-	QTreeWidgetItem* HeaderItem = mCurrentOutputBlockItem;
-	connect(CopyButton, &QToolButton::clicked, this, [=]()
-	{
-		QApplication::clipboard()->setText(LogBlockText(HeaderItem));
-		CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #6ee7a8; font-size: 12px; font-weight: 600;");
-		QTimer::singleShot(1100, CopyButton, [CopyButton]()
-		{
-			if (CopyButton)
-				CopyButton->setStyleSheet("background: transparent; border: 0; padding: 0 1px; color: #98a1aa; font-size: 12px; font-weight: 600;");
-		});
-	});
-	connect(ChevronButton, &QToolButton::clicked, this, [=]()
-	{
-		QSettings ButtonSettings;
-		const bool Expanded = HeaderItem->isExpanded();
-		HeaderItem->setExpanded(!Expanded);
-		HeaderItem->setData(0, ML_LOG_EXPANDED_ROLE, !Expanded);
-		HeaderItem->setSizeHint(0, QSize(0, LogBlockWidgetHeight(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString(), !Expanded)));
-		ChevronButton->setText(Expanded ? QString::fromUtf8("\xE2\x80\xBA") : QString::fromUtf8("\xE2\x8C\x84"));
-		ChevronButton->setToolTip(Expanded ? "Expand block" : "Collapse block");
-		LogMessageKind ButtonHeaderKind = DetectLogMessageKind(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString());
-		if (IsUnrecoverableLogLine(HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString()))
-			ButtonHeaderKind = LogMessageError;
-			UpdateLogBlockWidget(mOutputWidget->itemWidget(HeaderItem, 0), HeaderItem->data(0, ML_LOG_TEXT_ROLE).toString(), ColorForLogMessageKind(ButtonSettings, ButtonHeaderKind), OutputBlockBackgroundColor(mThemeMode, ButtonHeaderKind, qMax(0, mOutputBlockCounter - 1)), !Expanded);
-		mOutputWidget->doItemsLayout();
-	});
-	ActionLayout->addWidget(ChevronButton);
-	mOutputWidget->setItemWidget(mCurrentOutputBlockItem, 1, ActionWidget);
+	Q_UNUSED(BackgroundColor);
 }
 
 void mlMainWindow::UpdateOutputConsoleMode()
 {
 	QSettings Settings;
 	const bool ImprovedConsole = UseImprovedConsoleStyle(Settings);
-	const bool ShowPlainConsole = !ImprovedConsole || mOutputSelectionMode;
+	const bool ColorizePlainConsole = ImprovedConsole && IsConsoleColorCodingEnabled(Settings);
+	const QColor DefaultPlainColor = ColorForLogMessageKind(Settings, LogMessageDefault);
+	EnsureOutputPlainHighlighter(mOutputPlainWidget, ColorizePlainConsole, DefaultPlainColor);
 	if (mOutputTabs)
 		mOutputTabs->setVisible(ImprovedConsole);
 	if (mOutputWidget)
-		mOutputWidget->setVisible(ImprovedConsole && !ShowPlainConsole);
+		mOutputWidget->setVisible(false);
 	if (mOutputPlainWidget)
 	{
-		mOutputPlainWidget->setLineWrapMode(ImprovedConsole ? QPlainTextEdit::NoWrap : QPlainTextEdit::WidgetWidth);
-		mOutputPlainWidget->setHorizontalScrollBarPolicy(ImprovedConsole ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
-		mOutputPlainWidget->setVisible(ShowPlainConsole);
-	}
-	if (mLogSelectionButton)
-	{
-		mLogSelectionButton->setVisible(ImprovedConsole);
-		mLogSelectionButton->blockSignals(true);
-		mLogSelectionButton->setChecked(mOutputSelectionMode);
-		mLogSelectionButton->setText(mOutputSelectionMode ? "Block View" : "Text Select");
-		mLogSelectionButton->blockSignals(false);
+		mOutputPlainWidget->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+		mOutputPlainWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		mOutputPlainWidget->setVisible(true);
 	}
 }
 
@@ -6756,7 +12326,6 @@ void mlMainWindow::RebuildOutputFromBuffer()
 
 	QSettings Settings;
 	const bool ImprovedConsole = UseImprovedConsoleStyle(Settings);
-	const bool ShowPlainConsole = !ImprovedConsole || mOutputSelectionMode;
 	const QString FullOutput = mOutputFullText;
 	if (mOutputWidget)
 		mOutputWidget->clear();
@@ -6776,16 +12345,11 @@ void mlMainWindow::RebuildOutputFromBuffer()
 			VisibleBlocks.append(BlockText);
 	}
 
-	if (mOutputPlainWidget && ShowPlainConsole)
-		mOutputPlainWidget->setPlainText(VisibleBlocks.join("\n\n"));
+	if (mOutputPlainWidget)
+		mOutputPlainWidget->setPlainText(BuildPlainConsoleOutput(FullOutput, ImprovedConsole, mOutputTabIndex));
 
-	if (!ImprovedConsole || ShowPlainConsole)
-		return;
-
-	mOutputWidget->setUpdatesEnabled(false);
-	for (const QString& BlockText : VisibleBlocks)
-		AppendOutputBlock(BlockText, Settings);
-	mOutputWidget->setUpdatesEnabled(true);
+	Q_UNUSED(VisibleBlocks);
+	return;
 }
 
 Export2BinGroupBox::Export2BinGroupBox(QWidget* parent, mlMainWindow* parent_window) : QGroupBox(parent), parentWindow(parent_window)
