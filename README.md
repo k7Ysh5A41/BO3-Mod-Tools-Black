@@ -1,130 +1,110 @@
 # BO3 Mod Tools Black
 
-BO3 Mod Tools Black is a reworked Call of Duty: Black Ops III Mod Tools launcher.
-It keeps the Mod Tools workflow in one place and adds a large set of launcher-side
-features for browsing, publishing, logging, and customization.
+BO3 Mod Tools Black is a reworked Black Ops III Mod Tools launcher focused on faster iteration, cleaner project management, and modernized workflow.
 
-## Releases
+Changes were made primarily with the help of AI.
 
-This project ships with two public downloads:
+## Core Features
 
-- `1.0.0` - the main public release, used by default
-- `Original` - the restore package for the stock launcher entry
+### Project Access and Organization
 
-Both releases install into the game root and the modtools launcher folder:
+- Favorites and Recents for faster project access.
+- Workshop Versions for switching between versions (different workshop IDs).
+- Notes per mod/map.
+- Display names for mods/maps.
+- Colorized display names so projects can be color-coded in the launcher.
+- Map/Mod tags in Recents and Favorites.
+- Recategorized Maps/Mods list tabs: Recent, Favorites, ZM Maps, MP Maps, Mods, All.
+- All tab moved to the left.
+- Total Maps/Mods counter in the top-right.
+- Added estimated size of mod/map entries in the list.
+- Added rename functionality.
 
-- `Call of Duty Black Ops III\`
-- `Call of Duty Black Ops III\modtools\`
+### Themes and Visuals
 
-These are launcher-only releases. Do not replace the compiler, linker, or Radiant files.
-If you install `Original`, Steam will open the stock launcher again by design.
-Use `1.0.0` if you want the new launcher.
+- 3 themes:
+	- Original Updated: updated stock-style look.
+	- Original Classic: classic launcher look with classic styling behavior.
+	- Dark Modern: darker modern theme with cleaner UI.
+- New launcher button icon set, with option to switch back to original icons in settings.
+- Colorized titles that automatically remove visible ^6 color codes.
 
-## Install
+### Build, Run, and Iteration
 
-1. Download the release you want.
-2. Extract it into `Call of Duty Black Ops III\`.
-3. Overwrite the launcher files when prompted.
+- Rebuild mod/map while the game is running.
+- Run game without needing the Run checkbox ticked.
+- Build now always builds all languages.
+- Build (English) builds only English.
+- Quick Actions for running/building mods and maps directly from the list.
+- Quick Launch Map shown only when a mod is selected.
+- Revamped Quick Launch Map selection flow.
+- Online Mode support with launch progress and Steam handoff.
+- Potential fixes for Quick Launch map selection and startup game launch edge cases.
 
-After `1.0.0` is installed, you should have:
+### Publish Workflow
 
-- `Call of Duty Black Ops III\modtools_launcher.bat`
-- `Call of Duty Black Ops III\modtools\modtools_launcher.bat`
-- `Call of Duty Black Ops III\modtools\ModLauncherCustomRuntime\*`
+- Reworked Publish flow.
+- Publish Drafts before uploading.
+- Debrief Description and Steam Workshop Description fields.
+- Right-click publish for maps.
+- Ready for Publish action that removes XPAKs and compiles all languages automatically.
 
-For `1.0.0`, the important files are:
+### Console and Diagnostics
 
-- `modtools_launcher.bat`
-- `modtools\modtools_launcher.bat`
-- `modtools\ModLauncherCustomRuntime\*`
+- Reworked Console Log with color coding.
+- Color coding now also works in regular text view, with option to disable (bottom-right).
+- Different console tabs for warning/error categories.
+- Quick-copy buttons in Console Log.
+- Console filters in the bottom-right.
+- Windows menu in bottom-right to enable/disable dock windows.
+- Removed block console/log mode and simplified output flow.
+- Tabs in Console/Log can be dragged to change order.
 
-For `Original`, the package only restores:
+### Menus, Layout, and UX
 
-- `modtools_launcher.bat`
+- Revamped right-click menu.
+- Added map/mod Information dialog via right click.
+- Added Analyze Map/Mod:
+	- Analyzes map/mod content and checks zone references, #using paths, and other potential issues.
+- Reworked layout for better flow and less restrictive UI.
+- Drag-and-drop layout support for reordering docks/tabs.
+- Added Open Root / dropdown folder button.
+- Reorganized top toolbar.
+- Reorganized tabs in both Maps/Mods list and Console/Log.
+- Added Extra Tools dropdown with:
+	- Export2BinGUI
+	- Open Logs
+	- BO3 Script Reference by Jbird
 
-That package is meant to bring back the stock launcher entry, not the new one.
+### Safety and Quality-of-Life
 
-## Source
+- Multi-prompt delete (double confirmation before deleting a project).
+- Added launcher statistics.
+- Added inspirational quote on startup (off by default).
+- Added Credits in Help.
+- Added Check for Updates.
+- Updates install flow improved.
 
-If you want to build from source, open `ModLauncherSrc` in Visual Studio and use
-`build_modlauncher_custom.bat`.
+### Settings Overhaul
 
-The rebuilt runtime is copied to `modtools\ModLauncherCustomRuntime\` by the rebuild script.
+- Reworked Settings menu with:
+	- APE Reset
+	- Theme controls
+	- Console settings
+	- Custom CSS
+	- Custom background for Maps/Mods list
+	- Custom background for Console/Log
+	- Feature toggles across launcher behavior
 
-## Features
+## Technical Notes
 
-### Browsing and project management
+- Source is always open.
+- Automatic update checks use QtNetwork and the GitHub API.
 
-- Favorites and Recents help you get back to projects faster.
-- Workshop Versions let you save and restore project snapshots before publishing.
-- Notes per mod/map let you keep project-specific reminders.
-- Display names let you rename projects in the launcher without changing the real folder name.
-- Colorized display names let you assign a color to a project for visual grouping.
-- Map/Mod tags on Favorites and Recents make the list easier to scan.
-- Browsing tabs are recategorized into Recent, Favorites, ZM Maps, MP Maps, Mods, and All.
+## Suggestions and Requests
 
-### Themes
-
-- Original Updated is the modern default look.
-- Original Classic keeps the classic launcher feel and classic selection behavior.
-- Dark Modern is a darker, cleaner theme.
-
-### Quick actions and right-click menu
-
-- Quick Launch Map starts a map faster from the launcher.
-- Quick Actions on the maps/mods list let you run or build directly from an item.
-- The right-click menu was reworked so common actions are easier to reach.
-- Right-click publishing lets you publish a map or mod directly from the item menu.
-
-### Publishing
-
-- Reworked Publish flow guides the upload process.
-- Publish Drafts let you prepare a Workshop post before uploading.
-- Debrief Description and Steam Workshop Description are handled separately.
-- Ready for Publish removes XPAKs and compiles all languages automatically.
-
-### Online mode and launch flow
-
-- Online Mode supports Steam handoff and shows launch progress while the game starts.
-- The launcher can run the game even when the Run box is not ticked.
-- Rebuild while the game is running is supported.
-
-### Build behavior
-
-- Build now defaults to all languages.
-- Build (English) only builds English.
-- Multi-prompt delete asks twice before deleting a project.
-
-### Console log
-
-- The console log uses color coding for different message types.
-- Different tabs split errors and warnings into separate views.
-- Quick-copy buttons make it easy to copy a log block.
-- Console filters in the bottom-right let you hide or show log categories.
-
-### Settings
-
-- The settings menu was reworked.
-- APE Reset clears cache data.
-- Custom CSS can override launcher styling.
-- Custom backgrounds are supported for the maps/mods list and the console log.
-- Many toggles are exposed so you can enable or disable launcher features.
-
-## How some features work
-
-- Display names only affect the launcher UI. They do not rename the real folder.
-- Colorized display names are for organization and visual grouping.
-- Workshop Versions are stored snapshots, so you can move between versions before uploading.
-- Notes are saved per map or mod, so each project can carry its own info.
-- Ready for Publish is the fast prep step before uploading. It strips XPAKs and runs the language compile pass for you.
-- Online Mode shows a progress window while Steam hands off the launch request.
-
-## Upload checklist
-
-- `1.0.0` is the default public release.
-- `Original` restores the stock launcher entry.
-- Upload the zipped release assets, not the raw folder tree.
+Suggestions and requests can be submitted on Discord or GitHub: @Sphynxmods
 
 ## License
 
-The code is licensed under Apache 2.0. See `LICENSE` for details.
+Licensed under Apache 2.0. See LICENSE.
