@@ -1,8 +1,7 @@
-﻿/*
+/*
 *
 * Copyright 2016 Activision Publishing, Inc.
 *
-			UpdateBuildActionButtons();
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
@@ -20,12 +19,15 @@
 #include "stdafx.h"
 
 #include "mlMainWindow.h"
+#include "BackupToolPanel.h"
+#include "localization/LocalizationManager.h"
 
 #include <functional>
 #include <iomanip>
 #include <sstream>
 #include <TlHelp32.h>
 #include <utility>
+#include <QTimer>
 
 #pragma comment(lib, "steam_api64.lib")
 
@@ -43,11 +45,10 @@ dvar_s gDvars[] = {
 					{"splitscreen", "Enable splitscreen", DVAR_VALUE_BOOL},
 					{"splitscreen_playerCount", "Allocate the number of instances for splitscreen", DVAR_VALUE_INT, 0, 2}
 				 };
-static const char* kLauncherVersion = "1.0.4";
+static const char* kLauncherVersion = "1.0.5";
 // Point these at the repo that publishes the launcher ZIP asset users should install.
 static const char* kLauncherReleaseApiUrl = "https://api.github.com/repos/Sphynxmods/BO3-Mod-Tools-Black/releases/latest";
 static const char* kLauncherReleasesUrl = "https://github.com/Sphynxmods/BO3-Mod-Tools-Black/releases";
-
 static QString CleanVersionText(QString VersionText)
 {
 	VersionText = VersionText.trimmed();
@@ -229,7 +230,7 @@ static ToolbarItemConfig ToolbarItemFromMap(const QVariantMap& Map)
 	if (Item.Key.compare("plugins-menu", Qt::CaseInsensitive) == 0)
 		Item.Key = "extra-tools-menu";
 	if (Item.Label.isEmpty())
-		Item.Label = Item.BuiltIn ? Item.BuiltInActionKey : QObject::tr("Custom Item");
+		Item.Label = Item.BuiltIn ? Item.BuiltInActionKey : LocalizationManager::Instance().tr("toolbar.custom_item", "Custom Item");
 	if (Item.BuiltInActionKey.isEmpty() && Item.BuiltIn)
 		Item.BuiltInActionKey = BuiltInActionKeyForSlot(Item.Key);
 	if (Item.BuiltIn)
@@ -284,7 +285,7 @@ static QList<ToolbarItemConfig> LoadToolbarItems()
 		{
 			HasExtraToolsMenu = true;
 			if (Item.Label.trimmed().isEmpty() || Item.Label.compare("Plugins", Qt::CaseInsensitive) == 0)
-				Item.Label = "Extra Tools";
+				Item.Label = LocalizationManager::Instance().tr("toolbar.extra_tools", "Extra Tools");
 		}
 	}
 
@@ -292,7 +293,7 @@ static QList<ToolbarItemConfig> LoadToolbarItems()
 	{
 		ToolbarItemConfig ExtraToolsItem;
 		ExtraToolsItem.Key = "extra-tools-menu";
-		ExtraToolsItem.Label = "Extra Tools";
+		ExtraToolsItem.Label = LocalizationManager::Instance().tr("toolbar.extra_tools", "Extra Tools");
 		ExtraToolsItem.BuiltInActionKey = "extra-tools-menu";
 		ExtraToolsItem.BuiltIn = true;
 		ExtraToolsItem.Hidden = false;
@@ -692,7 +693,7 @@ static QString DefaultDisplayNameForEntryName(const QString& Name)
 	DisplayName.replace('-', ' ');
 	DisplayName = DisplayName.simplified();
 	if (DisplayName.isEmpty())
-		DisplayName = "No Map";
+		DisplayName = LocalizationManager::Instance().tr("common.no_map", "No Map");
 	return DisplayName;
 }
 
@@ -745,7 +746,7 @@ public:
 		mButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 		mButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		mButton->setCursor(Qt::PointingHandCursor);
-		mButton->setText("No Map");
+		mButton->setText(LocalizationManager::Instance().tr("quick_launch.no_map", LocalizationManager::Instance().tr("common.no_map", "No Map")));
 		Layout->addWidget(mButton);
 
 		mPopup->setObjectName("QuickLaunchPopup");
@@ -760,11 +761,11 @@ public:
 		SearchLayout->setContentsMargins(0, 0, 0, 0);
 		SearchLayout->setSpacing(8);
 		mSearchEdit->setObjectName("QuickLaunchSearch");
-		mSearchEdit->setPlaceholderText("Search maps, IDs, or codes...");
+		mSearchEdit->setPlaceholderText(LocalizationManager::Instance().tr("quick_launch.search_placeholder", "Search maps, IDs, or codes..."));
 		mSearchEdit->setClearButtonEnabled(true);
 		SearchLayout->addWidget(mSearchEdit, 1);
 		QToolButton* NoMapButton = new QToolButton(mPopup);
-		NoMapButton->setText("No Map");
+		NoMapButton->setText(LocalizationManager::Instance().tr("quick_launch.no_map", LocalizationManager::Instance().tr("common.no_map", "No Map")));
 		NoMapButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 		NoMapButton->setCursor(Qt::PointingHandCursor);
 		NoMapButton->setAutoRaise(true);
@@ -796,7 +797,7 @@ public:
 			for (int EntryIndex = 0; EntryIndex < mEntries.count(); ++EntryIndex)
 			{
 				const Entry& Item = mEntries[EntryIndex];
-				if (Item.Label.compare("No Map", Qt::CaseInsensitive) == 0 && Item.Code.isEmpty())
+				if (Item.Label.compare(LocalizationManager::Instance().tr("common.no_map", "No Map"), Qt::CaseInsensitive) == 0 && Item.Code.isEmpty())
 				{
 					SelectIndex(EntryIndex, true);
 					mPopup->hide();
@@ -991,7 +992,7 @@ private:
 				continue;
 
 			QString ItemText = Item.Label;
-			if (!Item.Code.isEmpty() && Item.Label.compare("No Map", Qt::CaseInsensitive) != 0)
+			if (!Item.Code.isEmpty() && Item.Label.compare(LocalizationManager::Instance().tr("common.no_map", "No Map"), Qt::CaseInsensitive) != 0)
 				ItemText += QString(" (%1)").arg(Item.Code);
 			QListWidgetItem* ListItem = new QListWidgetItem(ItemText, mListWidget);
 			ListItem->setData(Qt::UserRole, EntryIndex);
@@ -1040,7 +1041,7 @@ private:
 
 	void UpdateButtonText()
 	{
-		const QString Label = (mSelectedIndex >= 0 && mSelectedIndex < mEntries.count()) ? mEntries[mSelectedIndex].Label : QString("No Map");
+		const QString Label = (mSelectedIndex >= 0 && mSelectedIndex < mEntries.count()) ? mEntries[mSelectedIndex].Label : QString(LocalizationManager::Instance().tr("common.no_map", "No Map"));
 		mButton->setText(Label);
 		mButton->setToolTip(Label);
 	}
@@ -1073,7 +1074,7 @@ void mlMainWindow::PopulateQuickLaunchEntries()
 	{
 		mQuickLaunchWidget->AddEntry(Category, Label, Code, Detail, WorkshopId);
 	};
-	AddQuickLaunchEntry("General", "No Map", "");
+	AddQuickLaunchEntry("General", LocalizationManager::Instance().tr("common.no_map", "No Map"), "");
 	AddQuickLaunchEntry("Zombies", "Shadows of Evil", "zm_zod");
 	AddQuickLaunchEntry("Zombies", "Der Eisendrache", "zm_castle");
 	AddQuickLaunchEntry("Zombies", "Zetsubou No Shima", "zm_island");
@@ -1269,7 +1270,6 @@ static QStringList ThemeProfileSettingKeys()
 		<< "LogBackgroundImage"
 		<< "LogBackgroundOpacity"
 		<< "UseLegacyToolbarIcons"
-		<< "LauncherLayout"
 		<< "LogColors/Default"
 		<< "LogColors/Command"
 		<< "LogColors/Info"
@@ -1494,7 +1494,7 @@ static void UpdateBackgroundPreviewLabel(QLabel* PreviewLabel, const QString& Fi
 	if (!PreviewLabel)
 		return;
 
-	PreviewLabel->setText("None");
+	PreviewLabel->setText(LocalizationManager::Instance().tr("common.none", "None"));
 	PreviewLabel->setPixmap(QPixmap());
 
 	const QString NormalizedPath = FileName.trimmed();
@@ -1508,7 +1508,7 @@ static void UpdateBackgroundPreviewLabel(QLabel* PreviewLabel, const QString& Fi
 	const QPixmap SourcePixmap(PreviewPath);
 	if (SourcePixmap.isNull())
 	{
-		PreviewLabel->setText("Invalid");
+		PreviewLabel->setText(LocalizationManager::Instance().tr("common.invalid", "Invalid"));
 		return;
 	}
 
@@ -2856,7 +2856,7 @@ static LogMessageKind DetectLogMessageKind(const QString& Output)
 	if (Lower.contains(".exe ") || Lower.endsWith(".exe") || Lower.contains("linker_modtools") || Lower.contains("cod2map64") || Lower.contains("radiant_modtools"))
 		return LogMessageCommand;
 
-	if (Lower.contains("error") || Lower.contains("failed") || Lower.contains("could not") || Lower.contains("abnormally") || Lower.contains("invalid"))
+	if (Lower.contains("error") || Lower.contains("failed") || Lower.contains("could not") || Lower.contains("abnormally") || Lower.contains(LocalizationManager::Instance().tr("common.invalid", "Invalid")))
 		return LogMessageError;
 
 	if (Lower.contains("warning") || Lower.contains("skipping") || Lower.contains("english-only") || Lower.contains("english only"))
@@ -3188,6 +3188,7 @@ mlMainWindow::mlMainWindow()
 	mCentralWidgetSplitter = NULL;
 	mAssetDockWidget = NULL;
 	mOutputDockWidget = NULL;
+	mBackupDockWidget = NULL;
 	mMainToolBar = NULL;
 	mTopWidget = NULL;
 	mLeftPanel = NULL;
@@ -3238,6 +3239,31 @@ mlMainWindow::mlMainWindow()
 	mGameProcessId = 0;
 	mGameRunningState = GameNotRunning;
 	mBuildLanguage = Settings.value("BuildLanguage", "english").toString();
+	mLocalization = &LocalizationManager::Instance();
+	{
+		QStringList candidates;
+		candidates << QCoreApplication::applicationDirPath() + "/localization";
+		candidates << QCoreApplication::applicationDirPath() + "/../localization";
+		candidates << QCoreApplication::applicationDirPath() + "/../ModLauncherSrc/localization";
+		candidates << QCoreApplication::applicationDirPath() + "/../../ModLauncherSrc/localization";
+		QString locPath;
+		for (const QString& c : candidates)
+		{
+			if (QDir(c).exists())
+			{
+				locPath = c;
+				break;
+			}
+		}
+		if (locPath.isEmpty())
+			locPath = candidates[0];
+		mLocalization->setLocalizationPath(QDir::toNativeSeparators(locPath));
+	}
+	mLauncherLanguage = Settings.value("LauncherLanguage", "english").toString();
+	mLocalization->LoadLanguage(mLauncherLanguage);
+	AppendStartupTrace(QString("Localization path: %1").arg(mLocalization->localizationPath()));
+	AppendStartupTrace(QString("Launcher language: %1").arg(mLauncherLanguage));
+	AppendStartupTrace(QString("Translations loaded: %1").arg(mLocalization->translationCount()));
 	mLauncherLayout = Settings.value("LauncherLayout", "original").toString().trimmed().toLower();
 	if (mLauncherLayout.isEmpty() || mLauncherLayout == "current")
 		mLauncherLayout = "original";
@@ -3270,11 +3296,13 @@ mlMainWindow::mlMainWindow()
 	mToolsPath = QString(getenv("TA_TOOLS_PATH")).replace('\\', '/');
 	AppendStartupTrace(QString("ctor:paths game=%1 tools=%2").arg(mGamePath, mToolsPath));
 
+	AppendStartupTrace("ctor:auto-backup-watcher-ready");
+
 	ApplyThemeProfile(mThemeProfileId);
 	AppendStartupTrace("ctor:theme-profile-applied");
 
 	setWindowIcon(QIcon(":/resources/ModLauncher.png"));
-	setWindowTitle("BO3 Mod Tools Black");
+	setWindowTitle(mLocalization->tr("window.title", "BO3 Mod Tools Black"));
 
 	resize(1180, 780);
 
@@ -3324,12 +3352,12 @@ mlMainWindow::mlMainWindow()
 				mCategoryTabs->setTabTextColor(Index, Col);
 		}
 	};
-	AddCategoryTab("All", "all");
-	AddCategoryTab("Recent", "recent");
-	AddCategoryTab("Favorites", "favorites");
-	AddCategoryTab("ZM Maps", "zm-maps");
-	AddCategoryTab("MP Maps", "mp-maps");
-	AddCategoryTab("Mods", "mods");
+	AddCategoryTab(mLocalization->tr("category.all", "All"), "all");
+	AddCategoryTab(mLocalization->tr("category.recent", "Recent"), "recent");
+	AddCategoryTab(mLocalization->tr("category.favorites", "Favorites"), "favorites");
+	AddCategoryTab(mLocalization->tr("category.zm_maps", "ZM Maps"), "zm-maps");
+	AddCategoryTab(mLocalization->tr("category.mp_maps", "MP Maps"), "mp-maps");
+	AddCategoryTab(mLocalization->tr("category.mods", "Mods"), "mods");
 	// Load saved custom tabs
 	{
 		const QList<QVariantMap> CustomTabDefs = LoadCustomTabDefs();
@@ -3349,7 +3377,7 @@ mlMainWindow::mlMainWindow()
 			}
 		}
 	}
-	const int AddTabIndex = mCategoryTabs->addTab("+");
+	const int AddTabIndex = mCategoryTabs->addTab(mLocalization->tr("common.add", "+"));
 	mCategoryTabs->setTabData(AddTabIndex, "__add-category-tab__");
 	mCategoryTabs->setTabToolTip(AddTabIndex, "Add custom tab");
 	mCategoryTabs->setDocumentMode(true);
@@ -3442,12 +3470,12 @@ mlMainWindow::mlMainWindow()
 			return;
 
 		QMenu Menu(mCategoryTabs);
-		QAction* EditAction = Menu.addAction("Edit");
+		QAction* EditAction = Menu.addAction(mLocalization->tr("common.edit", mLocalization->tr("common.edit", "Edit")));
 		const bool CustomTab = TabKey.startsWith("custom-");
 
 		QWidgetAction* DeleteAction = new QWidgetAction(&Menu);
 		QToolButton* DeleteButton = new QToolButton(&Menu);
-		DeleteButton->setText("Delete");
+		DeleteButton->setText(mLocalization->tr("settings.delete", mLocalization->tr("settings.delete", "Delete")));
 		DeleteButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 		DeleteButton->setAutoRaise(true);
 		DeleteButton->setCursor(Qt::PointingHandCursor);
@@ -3542,7 +3570,7 @@ mlMainWindow::mlMainWindow()
 	ActionsLayout->setContentsMargins(10, 8, 10, 8);
 	ActionsLayout->setSpacing(6);
 
-	QLabel* BuildOptionsLabel = new QLabel("Build Options");
+	QLabel* BuildOptionsLabel = new QLabel(mLocalization->tr("build_panel.build_options", "Build Options"));
 	ActionsLayout->addWidget(BuildOptionsLabel);
 
 	QHBoxLayout* CompileLayout = new QHBoxLayout();
@@ -3550,11 +3578,11 @@ mlMainWindow::mlMainWindow()
 	CompileLayout->setSpacing(4);
 	ActionsLayout->addLayout(CompileLayout);
 
-	mCompileEnabledWidget = new QCheckBox("Compile");
+	mCompileEnabledWidget = new QCheckBox(mLocalization->tr("build_panel.compile", "Compile"));
 	CompileLayout->addWidget(mCompileEnabledWidget);
 
 	mCompileModeWidget = new QComboBox();
-	mCompileModeWidget->addItems(QStringList() << "Ents" << "Full");
+	mCompileModeWidget->addItems(QStringList() << mLocalization->tr("ents", "Ents") << mLocalization->tr("full", "Full"));
 	mCompileModeWidget->setCurrentIndex(1);
 	CompileLayout->addWidget(mCompileModeWidget);
 
@@ -3563,31 +3591,31 @@ mlMainWindow::mlMainWindow()
 	LightLayout->setSpacing(4);
 	ActionsLayout->addLayout(LightLayout);
 
-	mLightEnabledWidget = new QCheckBox("Light");
+	mLightEnabledWidget = new QCheckBox(mLocalization->tr("build_panel.light", "Light"));
 	LightLayout->addWidget(mLightEnabledWidget);
 
 	mLightQualityWidget = new QComboBox();
-	mLightQualityWidget->addItems(QStringList() << "Low" << "Medium" << "High");
+	mLightQualityWidget->addItems(QStringList() << mLocalization->tr("low", "Low") << mLocalization->tr("medium", "Medium") << mLocalization->tr("high", "High"));
 	mLightQualityWidget->setCurrentIndex(1);
-	mLightQualityWidget->setMinimumWidth(64); // Fix for "Medium" being cut off in the dark theme
+	mLightQualityWidget->setMinimumWidth(64); // Fix for mLocalization->tr("medium", "Medium") being cut off in the dark theme
 	LightLayout->addWidget(mLightQualityWidget);
 
-	mLinkEnabledWidget = new QCheckBox("Link");
+	mLinkEnabledWidget = new QCheckBox(mLocalization->tr("build_panel.link", "Link"));
 	ActionsLayout->addWidget(mLinkEnabledWidget);
 
-	mRunEnabledWidget = new QCheckBox("Run");
+	mRunEnabledWidget = new QCheckBox(mLocalization->tr("build_panel.run", "Run"));
 	ActionsLayout->addWidget(mRunEnabledWidget);
 	ActionsLayout->addSpacing(2);
 
 	mRunOptionsWidget = new QLineEdit();
 	mRunOptionsWidget->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
-	mRunOptionsWidget->setPlaceholderText("Extra args...");
+	mRunOptionsWidget->setPlaceholderText(mLocalization->tr("build_panel.extra_args", "Extra args..."));
 	ActionsLayout->addWidget(mRunOptionsWidget);
 	connect(mCompileEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
 	connect(mLightEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
 	connect(mLinkEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
 	connect(mRunEnabledWidget, &QCheckBox::toggled, this, [=](bool) { UpdateBuildActionButtons(); });
-	mQuickLaunchLabel = new QLabel("Quick Launch Map");
+	mQuickLaunchLabel = new QLabel(mLocalization->tr("build_panel.quick_launch_map", mLocalization->tr("dialog.quick_launch_map", "Quick Launch Map")));
 	ActionsLayout->addWidget(mQuickLaunchLabel);
 
 	mQuickLaunchWidget = new QuickLaunchPicker();
@@ -3605,40 +3633,40 @@ mlMainWindow::mlMainWindow()
 	ActionsLayout->addWidget(mStartupQuoteLabel);
 	UpdateQuickLaunchVisibility();
 
-	QLabel* BuildActionsLabel = new QLabel("Build Actions");
+	QLabel* BuildActionsLabel = new QLabel(mLocalization->tr("launcher.build_actions", "Build Actions"));
 	ActionsLayout->addWidget(BuildActionsLabel);
 
-	mBuildAllLanguagesButton = new QPushButton(QString("Build (%1)").arg(mBuildLanguage.compare("All", Qt::CaseInsensitive) == 0 ? QString("English") : mBuildLanguage));
+	mBuildAllLanguagesButton = new QPushButton(mLocalization->tr("launcher.build_single", "Build (%1)").arg(mBuildLanguage.compare("All", Qt::CaseInsensitive) == 0 ? mLocalization->tr("launcher.lang_english", "English") : mLocalization->tr(QString("launcher.lang_%1").arg(mBuildLanguage), mBuildLanguage)));
 	mBuildAllLanguagesButton->setObjectName("BuildEnglishButton");
 	connect(mBuildAllLanguagesButton, SIGNAL(clicked()), mActionEditBuildAllLanguages, SLOT(trigger()));
 	ActionsLayout->addWidget(mBuildAllLanguagesButton);
 
-	mBuildButton = new QPushButton("Build (All)");
+	mBuildButton = new QPushButton(mLocalization->tr("launcher.build_all", "Build (All)"));
 	mBuildButton->setObjectName("BuildButton");
 	connect(mBuildButton, SIGNAL(clicked()), mActionEditBuild, SLOT(trigger()));
 	ActionsLayout->addWidget(mBuildButton);
 	UpdateBuildActionButtons();
 
-	mDvarsButton = new QPushButton("Dvars");
+	mDvarsButton = new QPushButton(mLocalization->tr("launcher.dvars", "Dvars"));
 	connect(mDvarsButton, SIGNAL(clicked()), this, SLOT(OnEditDvars()));
 	ActionsLayout->addWidget(mDvarsButton);
 
-	mLogButton = new QPushButton("Save Log");
+	mLogButton = new QPushButton(mLocalization->tr("launcher.save_log", "Save Log"));
 	connect(mLogButton, SIGNAL(clicked()), this, SLOT(OnSaveLog()));
 	ActionsLayout->addWidget(mLogButton);
 
-	mIgnoreErrorsWidget = new QCheckBox("Ignore Errors");
+	mIgnoreErrorsWidget = new QCheckBox(mLocalization->tr("launcher.ignore_errors", "Ignore Errors"));
 	ActionsLayout->addWidget(mIgnoreErrorsWidget);
-	const QString RunOnlineToolTip = "Launch through Steam online mode so custom maps and mods can appear online.";
+	const QString RunOnlineToolTip = mLocalization->tr("build_panel.online_mode_tooltip", "Launch through Steam online mode so custom maps and mods can appear online.");
 	auto ShowRunOnlineGuide = [this, RunOnlineToolTip]()
 	{
-		QMessageBox::information(this, "Online Mode Guide",
-			RunOnlineToolTip + "\n\n"
+		QMessageBox::information(this, mLocalization->tr("online_mode_guide.title", "Online Mode Guide"),
+			mLocalization->tr("online_mode_guide.body",
 			"Use this when you want the game to launch through Steam instead of the direct executable. "
 			"That helps custom maps and mods show up correctly in online mode. Workshop quick-launch maps use this route automatically.\n\n"
-			"Leave it off if you want the normal direct launch behavior.");
+			"Leave it off if you want the normal direct launch behavior."));
 	};
-	mRunOnlineWidget = new QCheckBox("Online Mode");
+	mRunOnlineWidget = new QCheckBox(mLocalization->tr("build_panel.online_mode", "Online Mode"));
 	mRunOnlineWidget->setChecked(false);
 	if (Settings.contains("RunOnlineMode"))
 		mRunOnlineWidget->setChecked(Settings.value("RunOnlineMode").toBool());
@@ -3659,8 +3687,8 @@ mlMainWindow::mlMainWindow()
 	RunOnlineLayout->setSpacing(4);
 	RunOnlineLayout->addWidget(mRunOnlineWidget);
 	QToolButton* RunOnlineHelpButton = new QToolButton(RunOnlineRow);
-	RunOnlineHelpButton->setText("?");
-	RunOnlineHelpButton->setToolTip("Online mode guide");
+	RunOnlineHelpButton->setText(mLocalization->tr("common.help", "?"));
+	RunOnlineHelpButton->setToolTip(mLocalization->tr("tooltip.online_mode_guide", "Show information about Online Mode behavior."));
 	RunOnlineHelpButton->setAutoRaise(true);
 	RunOnlineHelpButton->setCursor(Qt::WhatsThisCursor);
 	RunOnlineHelpButton->setFixedSize(18, 18);
@@ -3720,9 +3748,9 @@ mlMainWindow::mlMainWindow()
 	});
 
 	ActionsLayout->addSpacing(4);
-	QLabel* GameControlLabel = new QLabel("Game Control");
+	QLabel* GameControlLabel = new QLabel(mLocalization->tr("game_control.game_control", "Game Control"));
 	ActionsLayout->addWidget(GameControlLabel);
-	mCloseGameButton = new QPushButton("Close Game");
+	mCloseGameButton = new QPushButton(mLocalization->tr("game_control.close_game", "Close Game"));
 	connect(mCloseGameButton, &QPushButton::clicked, this, [=]()
 	{
 		if (mGameRunningState != GameNotRunning)
@@ -3750,7 +3778,7 @@ mlMainWindow::mlMainWindow()
 		UpdateGameRunningState();
 	});
 	ActionsLayout->addWidget(mCloseGameButton);
-	mCloseGameStatusLabel = new QLabel("Game is not running");
+	mCloseGameStatusLabel = new QLabel(mLocalization->tr("game_control.game_not_running", "Game is not running"));
 	mCloseGameStatusLabel->setObjectName("GameStateLabel");
 	mCloseGameStatusLabel->setWordWrap(true);
 	ActionsLayout->addWidget(mCloseGameStatusLabel);
@@ -3819,16 +3847,16 @@ mlMainWindow::mlMainWindow()
 	mOutputTabs->setMovable(true);
 	mOutputTabs->setUsesScrollButtons(true);
 	mOutputTabs->setElideMode(Qt::ElideRight);
-	mOutputTabs->addTab("Full");
-	mOutputTabs->addTab("Errors");
-	mOutputTabs->addTab("Warnings");
-	mOutputTabs->addTab("Materials");
-	mOutputTabs->addTab("Images");
-	mOutputTabs->addTab("xmodels");
-	mOutputTabs->addTab("playercharacters");
-	mOutputTabs->addTab("converting/mesh");
-	mOutputTabs->addTab("techsets");
-	mOutputTabs->addTab("shaders");
+	mOutputTabs->addTab(mLocalization->tr("full", "Full"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_errors", "Errors"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_warnings", "Warnings"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_materials", "Materials"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_images", "Images"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_xmodels", "xmodels"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_playercharacters", "playercharacters"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_converting_mesh", "converting/mesh"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_techsets", "techsets"));
+	mOutputTabs->addTab(mLocalization->tr("console.tab_shaders", "shaders"));
 	mOutputTabs->setCurrentIndex(OutputLogTabFull);
 	connect(mOutputTabs, &QTabBar::currentChanged, this, [=](int Index)
 	{
@@ -3837,28 +3865,28 @@ mlMainWindow::mlMainWindow()
 	});
 	mLogFiltersButton = new QToolButton(this);
 	mLogFiltersButton->setObjectName("LogFiltersButton");
-	mLogFiltersButton->setText("Log Filters");
+	mLogFiltersButton->setText(mLocalization->tr("window.log_filters", "Log Filters"));
 	mLogFiltersButton->setPopupMode(QToolButton::InstantPopup);
 	QMenu* LogFiltersMenu = new QMenu(mLogFiltersButton);
 	struct LogFilterMenuEntry
 	{
 		LogFilterKind Kind;
-		const char* Label;
+		const char* Key;
 	};
 	const LogFilterMenuEntry LogFilterEntries[] =
 	{
-		{ LogFilterLeakMod, "Show L3akMod" },
-		{ LogFilterPhilLibX, "Show PhilLibX" },
-		{ LogFilterGdtDb, "Show gdtDB" },
-		{ LogFilterLinking, "Show Linking / done" },
-		{ LogFilterCommands, "Show commands" },
-		{ LogFilterWarnings, "Show warnings" },
-		{ LogFilterErrors, "Show errors" }
+		{ LogFilterLeakMod, "console.filter_leakmod" },
+		{ LogFilterPhilLibX, "console.filter_phillibx" },
+		{ LogFilterGdtDb, "console.filter_gdtdb" },
+		{ LogFilterLinking, "console.filter_linking" },
+		{ LogFilterCommands, "console.filter_commands" },
+		{ LogFilterWarnings, "console.filter_warnings" },
+		{ LogFilterErrors, "console.filter_errors" }
 	};
 	for (int EntryIdx = 0; EntryIdx < static_cast<int>(sizeof(LogFilterEntries) / sizeof(LogFilterEntries[0])); EntryIdx++)
 	{
 		const LogFilterMenuEntry Entry = LogFilterEntries[EntryIdx];
-		QAction* FilterAction = LogFiltersMenu->addAction(Entry.Label);
+		QAction* FilterAction = LogFiltersMenu->addAction(mLocalization->tr(Entry.Key, Entry.Key));
 		FilterAction->setCheckable(true);
 		FilterAction->setChecked(IsLogFilterEnabled(Settings, Entry.Kind));
 		connect(FilterAction, &QAction::toggled, this, [Entry](bool Enabled)
@@ -3871,12 +3899,12 @@ mlMainWindow::mlMainWindow()
 	OutputPanelLayout->addWidget(mOutputTabs, 0);
 	OutputPanelLayout->addWidget(mOutputWidget, 1);
 	OutputPanelLayout->addWidget(mOutputPlainWidget, 1);
-	mAssetDockWidget = new QDockWidget("Map/Mods List", this);
+	mAssetDockWidget = new QDockWidget(mLocalization->tr("common.dock_maps_mods", "Map/Mods List"), this);
 	mAssetDockWidget->setObjectName("AssetDockWidget");
 	mAssetDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
 	mAssetDockWidget->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
 	mAssetDockWidget->setWidget(mLeftPanel);
-	mOutputDockWidget = new QDockWidget("Console", this);
+	mOutputDockWidget = new QDockWidget(mLocalization->tr("common.dock_console", "Console"), this);
 	mOutputDockWidget->setObjectName("OutputDockWidget");
 	mOutputDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
 	mOutputDockWidget->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
@@ -3896,7 +3924,7 @@ mlMainWindow::mlMainWindow()
 	connect(mFooterRefreshButton, &QToolButton::clicked, this, &mlMainWindow::OnCheckForUpdates);
 	mFooterUpdateStatusLabel = new QLabel(QString("v%1 - Up to date").arg(kLauncherVersion), this);
 	mFooterUpdateStatusLabel->setObjectName("FooterStatusLabel");
-	mFooterDownloadButton = new QPushButton("Download", this);
+	mFooterDownloadButton = new QPushButton(mLocalization->tr("footer.download", "Download"), this);
 	mFooterDownloadButton->setObjectName("FooterDownloadButton");
 	mFooterDownloadButton->setVisible(false);
 	connect(mFooterDownloadButton, &QPushButton::clicked, this, [this]()
@@ -3911,7 +3939,7 @@ mlMainWindow::mlMainWindow()
 		SetFooterUpdateState(QString("Downloading %1...").arg(mAvailableUpdateVersion), mAvailableUpdateUrl, mAvailableUpdateVersion, mAvailableReleasePageUrl, true);
 		StartUpdateDownload(QUrl(mAvailableUpdateUrl), mAvailableUpdateVersion);
 	});
-	QLabel* FooterCreditsLabel = new QLabel("Edits by Sphynx", this);
+	QLabel* FooterCreditsLabel = new QLabel(mLocalization->tr("footer.edits_by", "Edits by Sphynx"), this);
 	FooterCreditsLabel->setObjectName("FooterStatusLabel");
 	const QString FooterDropdownStyle =
 		"QToolButton { background: transparent; border: 0; padding: 0 14px 0 8px; min-height: 18px; }"
@@ -3921,14 +3949,14 @@ mlMainWindow::mlMainWindow()
 		"QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 2px; }";
 	QToolButton* WindowFiltersButton = new QToolButton(this);
 	WindowFiltersButton->setObjectName("WindowFiltersButton");
-	WindowFiltersButton->setText("Windows");
+	WindowFiltersButton->setText(mLocalization->tr("window.windows", "Windows"));
 	WindowFiltersButton->setPopupMode(QToolButton::InstantPopup);
 	WindowFiltersButton->setStyleSheet(FooterDropdownStyle);
 	QMenu* WindowFiltersMenu = new QMenu(WindowFiltersButton);
-	QAction* ToggleAssetTreeAction = WindowFiltersMenu->addAction("Map/Mods List");
+	QAction* ToggleAssetTreeAction = WindowFiltersMenu->addAction(mLocalization->tr("common.dock_maps_mods", "Map/Mods List"));
 	ToggleAssetTreeAction->setCheckable(true);
 	ToggleAssetTreeAction->setChecked(mAssetDockWidget && mAssetDockWidget->isVisible());
-	QAction* ToggleConsoleAction = WindowFiltersMenu->addAction("Console / Log");
+	QAction* ToggleConsoleAction = WindowFiltersMenu->addAction(mLocalization->tr("window.console_log", "Console / Log"));
 	ToggleConsoleAction->setCheckable(true);
 	ToggleConsoleAction->setChecked(mOutputDockWidget && mOutputDockWidget->isVisible());
 	connect(ToggleAssetTreeAction, &QAction::toggled, this, [=](bool Visible)
@@ -3960,16 +3988,16 @@ mlMainWindow::mlMainWindow()
 	WindowFiltersButton->setMenu(WindowFiltersMenu);
 	QToolButton* ConsoleDisplayButton = new QToolButton(this);
 	ConsoleDisplayButton->setObjectName("ConsoleDisplayButton");
-	ConsoleDisplayButton->setText("Console Display");
+	ConsoleDisplayButton->setText(mLocalization->tr("window.console_display", "Console Display"));
 	ConsoleDisplayButton->setPopupMode(QToolButton::InstantPopup);
 	ConsoleDisplayButton->setStyleSheet(FooterDropdownStyle);
 	QMenu* ConsoleDisplayMenu = new QMenu(ConsoleDisplayButton);
 	QActionGroup* ConsoleColorCodingGroup = new QActionGroup(ConsoleDisplayMenu);
 	ConsoleColorCodingGroup->setExclusive(true);
-	QAction* ColorCodingEnabledAction = ConsoleDisplayMenu->addAction("Color Coding: Enabled");
+	QAction* ColorCodingEnabledAction = ConsoleDisplayMenu->addAction(mLocalization->tr("window.color_coding_enabled", "Color Coding: Enabled"));
 	ColorCodingEnabledAction->setCheckable(true);
 	ColorCodingEnabledAction->setActionGroup(ConsoleColorCodingGroup);
-	QAction* ColorCodingDisabledAction = ConsoleDisplayMenu->addAction("Color Coding: Disabled");
+	QAction* ColorCodingDisabledAction = ConsoleDisplayMenu->addAction(mLocalization->tr("window.color_coding_disabled", "Color Coding: Disabled"));
 	ColorCodingDisabledAction->setCheckable(true);
 	ColorCodingDisabledAction->setActionGroup(ConsoleColorCodingGroup);
 	const bool ConsoleColorCodingEnabled = Settings.value("ConsoleColorCodingEnabled", true).toBool();
@@ -3996,7 +4024,7 @@ mlMainWindow::mlMainWindow()
 	statusBar()->addPermanentWidget(ConsoleDisplayButton, 0);
 	statusBar()->addPermanentWidget(mLogFiltersButton, 0);
 	statusBar()->addPermanentWidget(FooterCreditsLabel, 0);
-	SetFooterUpdateState("Up to date");
+	SetFooterUpdateState(mLocalization->tr("footer.up_to_date", "Up to date"));
 
 	mShippedMapList << "mp_aerospace" <<  "mp_apartments" << "mp_arena" << "mp_banzai" << "mp_biodome" << "mp_chinatown" << "mp_city" << "mp_conduit" << "mp_crucible" << "mp_cryogen" << "mp_ethiopia" << "mp_freerun_01" << "mp_freerun_02" << "mp_freerun_03" << "mp_freerun_04" << "mp_havoc" << "mp_infection" << "mp_kung_fu" << "mp_metro" << "mp_miniature" << "mp_nuketown_x" << "mp_redwood" << "mp_rise" << "mp_rome" << "mp_ruins" << "mp_sector" << "mp_shrine" << "mp_skyjacked" << "mp_spire" << "mp_stronghold" << "mp_veiled" << "mp_waterpark" << "mp_western" << "zm_castle" << "zm_factory" << "zm_genesis" << "zm_island" << "zm_levelcommon" << "zm_stalingrad" << "zm_zod";
 
@@ -4020,6 +4048,7 @@ mlMainWindow::mlMainWindow()
 	AppendStartupTrace("ctor:update-theme-done");
 	PopulateFileList();
 	AppendStartupTrace("ctor:populate-file-list-done");
+	AppendStartupTrace("ctor:startup-done");
 	QTimer::singleShot(250, this, [this]()
 	{
 		AppendStartupTrace("ctor:delayed-populate-start");
@@ -4176,7 +4205,7 @@ void mlMainWindow::ShowOnlineLaunchProgressDialog(const QString& TargetLabel)
 	if (!mLaunchProgressDialog)
 	{
 		mLaunchProgressDialog = new QProgressDialog(this);
-		mLaunchProgressDialog->setWindowTitle("Starting Game");
+		mLaunchProgressDialog->setWindowTitle(mLocalization->tr("dialog.starting_game", "Starting Game"));
 		mLaunchProgressDialog->setMinimumDuration(0);
 		mLaunchProgressDialog->setRange(0, 0);
 		mLaunchProgressDialog->setAutoClose(false);
@@ -4225,92 +4254,92 @@ void mlMainWindow::CloseOnlineLaunchProgressDialog()
 
 void mlMainWindow::CreateActions()
 {
-	mActionFileNew = new QAction(ToolbarIconForActionKey("file-new"), "&New...", this);
+	mActionFileNew = new QAction(ToolbarIconForActionKey("file-new"), mLocalization->tr("menu.file_new", "&New..."), this);
 	mActionFileNew->setObjectName("file-new");
 	mActionFileNew->setShortcut(QKeySequence("Ctrl+N"));
 	connect(mActionFileNew, SIGNAL(triggered()), this, SLOT(OnFileNew()));
 
-	mActionFileAssetEditor = new QAction(ToolbarIconForActionKey("file-asset-editor"), "Asset Editor (APE)", this);
+	mActionFileAssetEditor = new QAction(ToolbarIconForActionKey("file-asset-editor"), mLocalization->tr("menu.file_asset_editor", "Asset Editor (APE)"), this);
 	mActionFileAssetEditor->setObjectName("file-asset-editor");
 	mActionFileAssetEditor->setShortcut(QKeySequence("Ctrl+A"));
 	connect(mActionFileAssetEditor, SIGNAL(triggered()), this, SLOT(OnFileAssetEditor()));
 
-	mActionFileOpenRoot = new QAction(QIcon(QCoreApplication::applicationDirPath() + "/folderIcon.png"), "Open", this);
+	mActionFileOpenRoot = new QAction(QIcon(QCoreApplication::applicationDirPath() + "/folderIcon.png"), mLocalization->tr("menu.file_open_root", "Open"), this);
 	mActionFileOpenRoot->setObjectName("file-open-root");
-	mActionFileOpenRoot->setToolTip("Open the Black Ops 3 root folder");
+	mActionFileOpenRoot->setToolTip(mLocalization->tr("tooltip.open_root", "Open the Black Ops 3 root folder"));
 	connect(mActionFileOpenRoot, SIGNAL(triggered()), this, SLOT(OnOpenModRootFolder()));
 
-	mActionFileOpenConsoleLog = new QAction(style()->standardIcon(QStyle::SP_FileIcon), "Open console_mp.log", this);
+	mActionFileOpenConsoleLog = new QAction(style()->standardIcon(QStyle::SP_FileIcon), mLocalization->tr("menu.file_open_console_log", "Open console_mp.log"), this);
 	mActionFileOpenConsoleLog->setObjectName("file-open-console-log");
-	mActionFileOpenConsoleLog->setToolTip("Open console_mp.log in the launcher");
+	mActionFileOpenConsoleLog->setToolTip(mLocalization->tr("tooltip.open_console_log", "Open console_mp.log in the launcher"));
 	connect(mActionFileOpenConsoleLog, SIGNAL(triggered()), this, SLOT(OnOpenConsoleLog()));
 
-	mActionFileOpenConsoleLogExternal = new QAction(style()->standardIcon(QStyle::SP_FileDialogListView), "Open console_mp.log in Editor", this);
+	mActionFileOpenConsoleLogExternal = new QAction(style()->standardIcon(QStyle::SP_FileDialogListView), mLocalization->tr("menu.file_open_console_log_editor", "Open console_mp.log in Editor"), this);
 	mActionFileOpenConsoleLogExternal->setObjectName("file-open-console-log-editor");
-	mActionFileOpenConsoleLogExternal->setToolTip("Open console_mp.log in the default text editor");
+	mActionFileOpenConsoleLogExternal->setToolTip(mLocalization->tr("tooltip.open_console_log_editor", "Open console_mp.log in the default text editor"));
 	connect(mActionFileOpenConsoleLogExternal, SIGNAL(triggered()), this, SLOT(OnOpenConsoleLogExternal()));
 
-	mActionFileOpenScriptReference = new QAction(ToolbarIconForActionKey("help-script-reference"), "BO3 Script Reference", this);
+	mActionFileOpenScriptReference = new QAction(ToolbarIconForActionKey("help-script-reference"), mLocalization->tr("menu.file_script_reference", "BO3 Script Reference"), this);
 	mActionFileOpenScriptReference->setObjectName("help-script-reference");
-	mActionFileOpenScriptReference->setToolTip("Open the BO3 Script Reference website");
+	mActionFileOpenScriptReference->setToolTip(mLocalization->tr("tooltip.script_reference", "Open the BO3 Script Reference website"));
 	connect(mActionFileOpenScriptReference, SIGNAL(triggered()), this, SLOT(OnOpenScriptReference()));
 
-	mActionFileLevelEditor = new QAction(ToolbarIconForActionKey("file-level-editor"), "Open Radiant", this);
+	mActionFileLevelEditor = new QAction(ToolbarIconForActionKey("file-level-editor"), mLocalization->tr("menu.file_radiant", "Open Radiant"), this);
 	mActionFileLevelEditor->setObjectName("file-level-editor");
 	mActionFileLevelEditor->setShortcut(QKeySequence("Ctrl+R"));
-	mActionFileLevelEditor->setToolTip("Level Editor");
+	mActionFileLevelEditor->setToolTip(mLocalization->tr("tooltip.radiant", "Level Editor"));
 	connect(mActionFileLevelEditor, SIGNAL(triggered()), this, SLOT(OnFileLevelEditor()));
 
-	mActionFileExport2Bin = new QAction(ToolbarIconForActionKey("file-export2bin"), "Export2Bin GUI", this);
+	mActionFileExport2Bin = new QAction(ToolbarIconForActionKey("file-export2bin"), mLocalization->tr("menu.file_export2bin", "Export2Bin GUI"), this);
 	mActionFileExport2Bin->setObjectName("file-export2bin");
 	mActionFileExport2Bin->setShortcut(QKeySequence("Ctrl+E"));
 	connect(mActionFileExport2Bin, SIGNAL(triggered()), this, SLOT(OnFileExport2Bin()));
 
-	mActionFileExit = new QAction("E&xit", this);
+	mActionFileExit = new QAction(mLocalization->tr("menu.file_exit", "E&xit"), this);
 	connect(mActionFileExit, SIGNAL(triggered()), this, SLOT(close()));
 
-	mActionEditBuild = new QAction(ToolbarIconForActionKey("edit-build"), "Build", this);
+	mActionEditBuild = new QAction(ToolbarIconForActionKey("edit-build"), mLocalization->tr("menu.edit_build", "Build"), this);
 	mActionEditBuild->setObjectName("edit-build");
 	mActionEditBuild->setShortcut(QKeySequence("Ctrl+B"));
 	connect(mActionEditBuild, SIGNAL(triggered()), this, SLOT(OnEditBuild()));
 
-	mActionEditBuildAllLanguages = new QAction("Build (English)", this);
+	mActionEditBuildAllLanguages = new QAction(mLocalization->tr("menu.edit_build_all", "Build (All)"), this);
 	mActionEditBuildAllLanguages->setShortcut(QKeySequence("Ctrl+Shift+B"));
 	connect(mActionEditBuildAllLanguages, SIGNAL(triggered()), this, SLOT(OnEditBuildAllLanguages()));
 
-	mActionEditAnalyze = new QAction(ToolbarIconForActionKey("edit-analyze"), "Analyze", this);
+	mActionEditAnalyze = new QAction(ToolbarIconForActionKey("edit-analyze"), mLocalization->tr("menu.edit_analyze", "Analyze"), this);
 	mActionEditAnalyze->setObjectName("edit-analyze");
 	connect(mActionEditAnalyze, SIGNAL(triggered()), this, SLOT(OnAnalyzeItem()));
 
-	mActionEditInformation = new QAction(style()->standardIcon(QStyle::SP_FileDialogInfoView), "Information", this);
+	mActionEditInformation = new QAction(style()->standardIcon(QStyle::SP_FileDialogInfoView), mLocalization->tr("menu.edit_information", "Information"), this);
 	mActionEditInformation->setObjectName("edit-information");
 	connect(mActionEditInformation, &QAction::triggered, this, [this]()
 	{
 		ShowItemInformationDialog(ActiveFileItem());
 	});
 
-	mActionEditReadyForPublish = new QAction(ToolbarIconForActionKey("edit-ready-for-publish"), "Publish Check", this);
+	mActionEditReadyForPublish = new QAction(ToolbarIconForActionKey("edit-ready-for-publish"), mLocalization->tr("menu.edit_publish_check", mLocalization->tr("dialog.publish_check", "Publish Check")), this);
 	mActionEditReadyForPublish->setObjectName("edit-ready-for-publish");
 	connect(mActionEditReadyForPublish, SIGNAL(triggered()), this, SLOT(OnEditReadyForPublish()));
 
-	mActionEditPublish = new QAction(ToolbarIconForActionKey("edit-publish"), "Publish", this);
+	mActionEditPublish = new QAction(ToolbarIconForActionKey("edit-publish"), mLocalization->tr("menu.edit_publish", "Publish"), this);
 	mActionEditPublish->setObjectName("edit-publish");
 	mActionEditPublish->setShortcut(QKeySequence("Ctrl+P"));
 	connect(mActionEditPublish, SIGNAL(triggered()), this, SLOT(OnEditPublish()));
 
-	mActionEditOptions = new QAction("&Options...", this);
+	mActionEditOptions = new QAction(mLocalization->tr("menu.edit_options", "&Options..."), this);
 	connect(mActionEditOptions, SIGNAL(triggered()), this, SLOT(OnEditOptions()));
 
-	mActionHelpCheckUpdates = new QAction("Check for &Updates...", this);
+	mActionHelpCheckUpdates = new QAction(mLocalization->tr("menu.help_check_updates", "Check for &Updates..."), this);
 	connect(mActionHelpCheckUpdates, SIGNAL(triggered()), this, SLOT(OnCheckForUpdates()));
 	
-	mActionHelpCredits = new QAction("&Credits...", this);
+	mActionHelpCredits = new QAction(mLocalization->tr("menu.help_credits", "&Credits..."), this);
 	connect(mActionHelpCredits, SIGNAL(triggered()), this, SLOT(OnHelpCredits()));
 	
-	mActionHelpAbout = new QAction("&About...", this);
+	mActionHelpAbout = new QAction(mLocalization->tr("menu.help_about", "&About..."), this);
 	connect(mActionHelpAbout, SIGNAL(triggered()), this, SLOT(OnHelpAbout()));
 
-	mActionHelpGuide = new QAction("&Guide / What's New...", this);
+	mActionHelpGuide = new QAction(mLocalization->tr("menu.help_guide", "&Guide / What's New..."), this);
 	connect(mActionHelpGuide, SIGNAL(triggered()), this, SLOT(OnHelpGuide()));
 }
 
@@ -4319,7 +4348,7 @@ void mlMainWindow::CreateMenu()
 	QMenuBar* MenuBar = new QMenuBar(this);
 	auto BuildOpenMenu = [this](QWidget* Parent) -> QMenu*
 	{
-		QMenu* OpenMenu = new QMenu("Open", Parent);
+		QMenu* OpenMenu = new QMenu(mLocalization->tr("menu.file_open_root", "Open"), Parent);
 		struct OpenFolderEntry
 		{
 			const char* Label;
@@ -4352,7 +4381,7 @@ void mlMainWindow::CreateMenu()
 		return OpenMenu;
 	};
 	
-	QMenu* FileMenu = new QMenu("&File", MenuBar);
+	QMenu* FileMenu = new QMenu(mLocalization->tr("menu.file", "&File"), MenuBar);
 	FileMenu->addAction(mActionFileNew);
 	FileMenu->addSeparator();
 	FileMenu->addMenu(BuildOpenMenu(FileMenu));
@@ -4365,7 +4394,7 @@ void mlMainWindow::CreateMenu()
 	FileMenu->addAction(mActionFileExit);
 	MenuBar->addAction(FileMenu->menuAction());
 
-	QMenu* EditMenu = new QMenu("&Edit", MenuBar);
+	QMenu* EditMenu = new QMenu(mLocalization->tr("menu.edit", "&Edit"), MenuBar);
 	EditMenu->addAction(mActionEditBuild);
 	EditMenu->addAction(mActionEditBuildAllLanguages);
 	EditMenu->addAction(mActionEditAnalyze);
@@ -4374,12 +4403,12 @@ void mlMainWindow::CreateMenu()
 	EditMenu->addAction(mActionEditPublish);
 	MenuBar->addAction(EditMenu->menuAction());
 
-	QMenu* ThemesMenu = new QMenu("&Themes", MenuBar);
+	QMenu* ThemesMenu = new QMenu(mLocalization->tr("menu.themes", "&Themes"), MenuBar);
 	QActionGroup* ThemeGroup = new QActionGroup(ThemesMenu);
 	ThemeGroup->setExclusive(true);
-		mActionThemeModern = ThemesMenu->addAction("Original Updated", this, SLOT(OnSetModernTheme()));
-		mActionThemeClassic = ThemesMenu->addAction("Original Classic", this, SLOT(OnSetClassicTheme()));
-		mActionThemeDarkModern = ThemesMenu->addAction("Dark Modern", this, SLOT(OnSetDarkModernTheme()));
+		mActionThemeModern = ThemesMenu->addAction(mLocalization->tr("menu.theme_original_updated", "Original Updated"), this, SLOT(OnSetModernTheme()));
+		mActionThemeClassic = ThemesMenu->addAction(mLocalization->tr("menu.theme_original_classic", "Original Classic"), this, SLOT(OnSetClassicTheme()));
+		mActionThemeDarkModern = ThemesMenu->addAction(mLocalization->tr("menu.theme_dark_modern", "Dark Modern"), this, SLOT(OnSetDarkModernTheme()));
 	mActionThemeModern->setCheckable(true);
 	mActionThemeDarkModern->setCheckable(true);
 	mActionThemeClassic->setCheckable(true);
@@ -4388,11 +4417,12 @@ void mlMainWindow::CreateMenu()
 		ThemeGroup->addAction(mActionThemeDarkModern);
 	MenuBar->addAction(ThemesMenu->menuAction());
 
-	QMenu* OptionsMenu = new QMenu("&Options", MenuBar);
+	QMenu* OptionsMenu = new QMenu(mLocalization->tr("menu.options", "&Options"), MenuBar);
+	OptionsMenu->addSeparator();
 	OptionsMenu->addAction(mActionEditOptions);
 	MenuBar->addAction(OptionsMenu->menuAction());
 
-	QMenu* HelpMenu = new QMenu("&Help", MenuBar);
+	QMenu* HelpMenu = new QMenu(mLocalization->tr("menu.help", "&Help"), MenuBar);
 	HelpMenu->addAction(mActionHelpGuide);
 	HelpMenu->addSeparator();
 	HelpMenu->addAction(mActionHelpCheckUpdates);
@@ -4415,7 +4445,7 @@ void mlMainWindow::CreateToolBar()
 		mMainToolBar = NULL;
 	}
 
-	QToolBar* ToolBar = new QToolBar("Standard", this);
+	QToolBar* ToolBar = new QToolBar(mLocalization->tr("toolbar.standard", "Standard"), this);
 	ToolBar->setObjectName(QStringLiteral("StandardToolBar"));
 	ToolBar->setMovable(false);
 	ToolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
@@ -4430,7 +4460,7 @@ void mlMainWindow::CreateToolBar()
 		QToolButton* ExtraToolsButton = new QToolButton(ToolBar);
 		ExtraToolsButton->setObjectName("ExtraToolsDropDownButton");
 		ExtraToolsButton->setIcon(ToolbarIconForActionKey("extra-tools-menu"));
-		ExtraToolsButton->setText("Extra Tools");
+		ExtraToolsButton->setText(mLocalization->tr("toolbar.extra_tools", "Extra Tools"));
 		ExtraToolsButton->setPopupMode(QToolButton::InstantPopup);
 		ExtraToolsButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
 		ExtraToolsButton->setStyleSheet(
@@ -4445,10 +4475,12 @@ void mlMainWindow::CreateToolBar()
 			"QMenu::icon { left: 12px; }"
 			"QMenu::right-arrow { width: 12px; height: 12px; margin-right: 6px; }");
 		ExtraToolsMenu->addAction(mActionFileExport2Bin);
-		QMenu* OpenLogsMenu = ExtraToolsMenu->addMenu(style()->standardIcon(QStyle::SP_FileDialogDetailedView), "Open Logs");
+		QMenu* OpenLogsMenu = ExtraToolsMenu->addMenu(style()->standardIcon(QStyle::SP_FileDialogDetailedView), mLocalization->tr("toolbar.open_logs", "Open Logs"));
 		OpenLogsMenu->setStyleSheet(ExtraToolsMenu->styleSheet());
 		OpenLogsMenu->addAction(mActionFileOpenConsoleLog);
 		OpenLogsMenu->addAction(mActionFileOpenConsoleLogExternal);
+		ExtraToolsMenu->addSeparator();
+
 		ExtraToolsMenu->addAction(mActionFileOpenScriptReference);
 		ExtraToolsButton->setMenu(ExtraToolsMenu);
 		ToolBar->addWidget(ExtraToolsButton);
@@ -4498,7 +4530,7 @@ void mlMainWindow::CreateToolBar()
 			ItemIcon = QIcon(Item.IconPath);
 		else
 			ItemIcon = style()->standardIcon(QStyle::SP_FileIcon);
-		QAction* CustomAction = new QAction(ItemIcon, Item.Label.isEmpty() ? QString("Custom Item") : Item.Label, ToolBar);
+		QAction* CustomAction = new QAction(ItemIcon, Item.Label.isEmpty() ? QString(mLocalization->tr("toolbar.custom_item", "Custom Item")) : mLocalization->tr("toolbar." + Item.Key, Item.Label), ToolBar);
 		connect(CustomAction, &QAction::triggered, this, [this, Item]()
 		{
 			ExecuteToolbarScript(this, Item.FunctionScript);
@@ -4536,7 +4568,7 @@ void mlMainWindow::CreateToolBar()
 void mlMainWindow::InitExport2BinGUI()
 {
 	QDockWidget *dock = new QDockWidget(this);
-	dock->setWindowTitle("Export2Bin");
+	dock->setWindowTitle(mLocalization->tr("window.export2bin", "Export2Bin"));
 	dock->setFloating(true);
 
 	QWidget* widget = new QWidget(dock);
@@ -4547,23 +4579,23 @@ void mlMainWindow::InitExport2BinGUI()
 	Export2BinGroupBox* groupBox = new Export2BinGroupBox(dock, this);
 	gridLayout->addWidget(groupBox, 0, 0);
 
-	QLabel* label = new QLabel("Drag Files Here", groupBox);
+	QLabel* label = new QLabel(mLocalization->tr("export2bin.drag_files", "Drag Files Here"), groupBox);
 	label->setAlignment(Qt::AlignCenter);
 	QVBoxLayout* groupBoxLayout = new QVBoxLayout(groupBox);
 	groupBoxLayout->addWidget(label);
 	groupBox->setLayout(groupBoxLayout);
 
-	mExport2BinOverwriteWidget = new QCheckBox("&Overwrite Existing Files", widget);
+	mExport2BinOverwriteWidget = new QCheckBox(mLocalization->tr("export2bin.overwrite", "&Overwrite Existing Files"), widget);
 	gridLayout->addWidget(mExport2BinOverwriteWidget, 1, 0);
 
 	QSettings Settings;
 	mExport2BinOverwriteWidget->setChecked(Settings.value("Export2Bin_OverwriteFiles", true).toBool());
 
 	QHBoxLayout* dirLayout = new QHBoxLayout();
-	QLabel* dirLabel = new QLabel("Ouput Directory:", widget);
+	QLabel* dirLabel = new QLabel(mLocalization->tr("export2bin.output_dir", "Ouput Directory:"), widget);
 	mExport2BinTargetDirWidget = new QLineEdit(widget);
 	QToolButton* dirBrowseButton = new QToolButton(widget);
-	dirBrowseButton->setText("...");
+	dirBrowseButton->setText(mLocalization->tr("common.browse", "..."));
 
 	const QDir defaultPath = QString("%1/model_export/export2bin/").arg(mToolsPath);
 	mExport2BinTargetDirWidget->setText(Settings.value("Export2Bin_TargetDir", defaultPath.absolutePath()).toString());
@@ -4767,7 +4799,7 @@ void mlMainWindow::UpdateGameRunningState()
 	mGameRunningState = DetectGameRunningState();
 	const qint64 NowMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 0;
 	const bool WaitingForRecentLaunch = mPendingLaunchRequestedMs > 0 && NowMs > 0 && NowMs - mPendingLaunchRequestedMs < 120000;
-	if (mGameRunningState == GameNotRunning && WaitingForRecentLaunch)
+	if (mGameRunningState == GameNotRunning && WaitingForRecentLaunch && !mBuildThread)
 		mGameRunningState = GameStarting;
 	if (mGameRunningState != GameNotRunning)
 		mPendingLaunchRequestedMs = 0;
@@ -4778,17 +4810,17 @@ void mlMainWindow::UpdateGameRunningState()
 
 	if (mGameRunningState == GameRunning)
 	{
-		mCloseGameButton->setText("Close Game");
+		mCloseGameButton->setText(mLocalization->tr("game_control.close_game", "Close Game"));
 		mCloseGameButton->setEnabled(true);
-		mCloseGameStatusLabel->setText("Game Running!");
+		mCloseGameStatusLabel->setText(mLocalization->tr("game_control.game_running", "Game Running!"));
 		mCloseGameStatusLabel->setStyleSheet("color: #44d17a; font-weight: 700;");
 		CloseOnlineLaunchProgressDialog();
 	}
 	else if (mGameRunningState == GameStarting)
 	{
-		mCloseGameButton->setText("Close Game");
+		mCloseGameButton->setText(LocalizationManager::Instance().tr("common.cancel", "Cancel"));
 		mCloseGameButton->setEnabled(true);
-		mCloseGameStatusLabel->setText("Game starting up...");
+		mCloseGameStatusLabel->setText(mLocalization->tr("game_control.game_starting", "Game starting up..."));
 		mCloseGameStatusLabel->setStyleSheet("color: #ff9b42;");
 		if (mPendingOnlineLaunchFeedback && mLaunchProgressDialog)
 		{
@@ -4811,23 +4843,36 @@ void mlMainWindow::UpdateGameRunningState()
 		QTreeWidgetItem* CurrentItem = mFileListWidget ? mFileListWidget->currentItem() : NULL;
 		const int ItemType = CurrentItem ? CurrentItem->data(0, Qt::UserRole).toInt() : ML_ITEM_UNKNOWN;
 		const bool CurrentItemChecked = CurrentItem && CurrentItem->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked;
+		bool HasChildChecked = false;
+		if (CurrentItem && !CurrentItemChecked && (ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP))
+		{
+			for (int i = 0; i < CurrentItem->childCount(); i++)
+			{
+				if (CurrentItem->child(i)->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked)
+				{
+					HasChildChecked = true;
+					break;
+				}
+			}
+		}
+		const bool CanLaunchMod = CurrentItemChecked || HasChildChecked;
 		if (ItemType == ML_ITEM_MAP)
 		{
-			mCloseGameButton->setText("Start Map");
+			mCloseGameButton->setText(mLocalization->tr("game_control.start_map", "Start Map"));
 			mCloseGameButton->setEnabled(CurrentItemChecked);
-			mCloseGameStatusLabel->setText(CurrentItemChecked ? "Launch Map" : "Check the selected map to launch it");
+			mCloseGameStatusLabel->setText(CurrentItemChecked ? mLocalization->tr("game_control.launch_map", "Launch Map") : mLocalization->tr("game_control.check_map", "Check the selected map to launch it"));
 		}
 		else if (ItemType == ML_ITEM_MOD || ItemType == ML_ITEM_MOD_GROUP)
 		{
-			mCloseGameButton->setText("Start Mod");
-			mCloseGameButton->setEnabled(CurrentItemChecked);
-			mCloseGameStatusLabel->setText(CurrentItemChecked ? "Launch Mod" : "Check the selected mod to launch it");
+			mCloseGameButton->setText(mLocalization->tr("game_control.start_mod", "Start Mod"));
+			mCloseGameButton->setEnabled(CanLaunchMod);
+			mCloseGameStatusLabel->setText(CanLaunchMod ? mLocalization->tr("game_control.launch_mod", "Launch Mod") : mLocalization->tr("game_control.check_mod", "Check the selected mod to launch it"));
 		}
 		else
 		{
-			mCloseGameButton->setText("Start Game");
+			mCloseGameButton->setText(mLocalization->tr("game_control.start_game", "Start Game"));
 			mCloseGameButton->setEnabled(false);
-			mCloseGameStatusLabel->setText("Select and check a map or mod to launch it");
+			mCloseGameStatusLabel->setText(mLocalization->tr("game_control.select_map_mod", "Select and check a map or mod to launch it"));
 		}
 		mCloseGameStatusLabel->setStyleSheet(QString());
 	}
@@ -5176,7 +5221,7 @@ bool mlMainWindow::EditNotesForItem(QTreeWidgetItem* Item)
 	QFile File(FilePath);
 	if (!File.open(QIODevice::WriteOnly))
 	{
-		QMessageBox::warning(this, "Notes", QString("Unable to save notes to '%1'.").arg(FilePath));
+		QMessageBox::warning(this, mLocalization->tr("dialog.notes", "Notes"), QString("Unable to save notes to '%1'.").arg(FilePath));
 		return false;
 	}
 
@@ -5278,7 +5323,7 @@ void mlMainWindow::ShowItemInformationDialog(QTreeWidgetItem* Item)
 	AddInfoRow("Compile Time", QString("%1 across %2 build(s)").arg(FormatDuration(CompileSeconds)).arg(CompileCount));
 	AddInfoRow("Link Time", QString("%1 across %2 link(s)").arg(FormatDuration(LinkSeconds)).arg(LinkCount));
 	AddInfoRow("Workshop Publishes", QString::number(PublishCount));
-	AddInfoRow("Workshop Versions", QString::number(VersionFolders.count()));
+	AddInfoRow(mLocalization->tr("dialog.workshop_versions", "Workshop Versions"), QString::number(VersionFolders.count()));
 	AddInfoRow("Workshop Title", WorkshopRootObject.value("Title").toString());
 	AddInfoRow("Workshop File ID", WorkshopRootObject.value("PublisherID").toString());
 	AddInfoRow("Last Compile", FormatUtc(LastCompileUtc));
@@ -5291,7 +5336,7 @@ void mlMainWindow::ShowItemInformationDialog(QTreeWidgetItem* Item)
 	BottomDivider->setFrameShape(QFrame::HLine);
 	Layout->addWidget(BottomDivider);
 
-	QLabel* NotesLabel = new QLabel("Notes", &Dialog);
+	QLabel* NotesLabel = new QLabel(mLocalization->tr("dialog.notes", "Notes"), &Dialog);
 	QFont NotesFont = NotesLabel->font();
 	NotesFont.setBold(true);
 	NotesLabel->setFont(NotesFont);
@@ -5338,7 +5383,7 @@ bool mlMainWindow::SaveWorkshopVersionSnapshot(int ItemType, const QString& Cont
 	QFile SourceFile(SourceWorkshopJsonPath);
 	if (!SourceFile.open(QIODevice::ReadOnly))
 	{
-		QMessageBox::warning(this, "Workshop Versions", QString("Unable to open '%1'.").arg(SourceWorkshopJsonPath));
+		QMessageBox::warning(this, mLocalization->tr("dialog.workshop_versions", "Workshop Versions"), QString("Unable to open '%1'.").arg(SourceWorkshopJsonPath));
 		return false;
 	}
 
@@ -5379,7 +5424,7 @@ bool mlMainWindow::SaveWorkshopVersionSnapshot(int ItemType, const QString& Cont
 	QFile OutFile(QDir::cleanPath(QString("%1/workshop.json").arg(VersionFolder)));
 	if (!OutFile.open(QIODevice::WriteOnly))
 	{
-		QMessageBox::warning(this, "Workshop Versions", QString("Unable to save version into '%1'.").arg(VersionFolder));
+		QMessageBox::warning(this, mLocalization->tr("dialog.workshop_versions", "Workshop Versions"), QString("Unable to save version into '%1'.").arg(VersionFolder));
 		return false;
 	}
 
@@ -5433,7 +5478,7 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 	QDir().mkpath(VersionsRoot);
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Workshop Versions");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.workshop_versions", "Workshop Versions"));
 	Dialog.resize(760, 480);
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 	const QString FavoriteKey = (ItemType == ML_ITEM_MAP)
@@ -5511,14 +5556,14 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 			VersionName->setObjectName("WorkshopVersionTitleLabel");
 			VersionName->setStyleSheet("font-weight:700;");
 			TextLayout->addWidget(VersionName);
-			QLabel* IdLabel = new QLabel(QString("Workshop ID: %1").arg(Root.value("PublisherID").toString().isEmpty() ? "none" : Root.value("PublisherID").toString()), RowWidget);
+			QLabel* IdLabel = new QLabel(QString("Workshop ID: %1").arg(Root.value("PublisherID").toString().isEmpty() ? LocalizationManager::Instance().tr("common.none", "None") : Root.value("PublisherID").toString()), RowWidget);
 			IdLabel->setObjectName("WorkshopVersionIdLabel");
 			TextLayout->addWidget(IdLabel);
 			RowLayout->addLayout(TextLayout, 1);
 
 			if (IsActive)
 			{
-				QLabel* ActiveLabel = new QLabel("ACTIVE", RowWidget);
+				QLabel* ActiveLabel = new QLabel(mLocalization->tr("dialog.active_label", "ACTIVE"), RowWidget);
 				ActiveLabel->setObjectName("WorkshopVersionActiveBadge");
 				RowLayout->addWidget(ActiveLabel, 0, Qt::AlignTop);
 			}
@@ -5543,13 +5588,14 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 	RefreshVersions();
 
 	QHBoxLayout* Buttons = new QHBoxLayout();
-	QPushButton* SaveCurrentButton = new QPushButton("Save Current");
-	QPushButton* ImportButton = new QPushButton("Import workshop.json");
-	QPushButton* ActivateButton = new QPushButton("Select Version");
-	QPushButton* EditActiveButton = new QPushButton("Edit Active JSON");
-	QPushButton* EditSelectedButton = new QPushButton("Edit Selected JSON");
-	QPushButton* DeleteButton = new QPushButton("Delete Selected");
-	QPushButton* OpenFolderButton = new QPushButton("Open Folder");
+	QPushButton* SaveCurrentButton = new QPushButton(mLocalization->tr("dialog.save_current", "Save Current"));
+	QPushButton* ImportButton = new QPushButton(mLocalization->tr("dialog.import_workshop_json", "Import workshop.json"));
+	QPushButton* ActivateButton = new QPushButton(mLocalization->tr("dialog.select_version", "Select Version"));
+	QPushButton* EditActiveButton = new QPushButton(mLocalization->tr("dialog.edit_active_json", "Edit Active JSON"));
+	QPushButton* EditSelectedButton = new QPushButton(mLocalization->tr("dialog.edit_selected_json", "Edit Selected JSON"));
+	QPushButton* DeleteButton = new QPushButton(mLocalization->tr("dialog.delete_selected", "Delete Selected"));
+	QPushButton* OpenFolderButton = new QPushButton(LocalizationManager::Instance().tr("common.open_folder", "Open Folder"));
+	QPushButton* NewUploadButton = new QPushButton(mLocalization->tr("dialog.new_workshop_upload", "New Workshop Upload..."));
 	Buttons->addWidget(SaveCurrentButton);
 	Buttons->addWidget(ImportButton);
 	Buttons->addWidget(ActivateButton);
@@ -5557,6 +5603,7 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 	Buttons->addWidget(EditSelectedButton);
 	Buttons->addWidget(DeleteButton);
 	Buttons->addWidget(OpenFolderButton);
+	Buttons->addWidget(NewUploadButton);
 	Layout->addLayout(Buttons);
 
 	connect(SaveCurrentButton, &QPushButton::clicked, &Dialog, [&, this]()
@@ -5564,7 +5611,7 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 		const QString CurrentJson = QDir::cleanPath(QString("%1/workshop.json").arg(ActiveFolder));
 		if (!QFileInfo(CurrentJson).isFile())
 		{
-			QMessageBox::information(&Dialog, "Workshop Versions", "No active workshop.json was found in the live zone folder.");
+			QMessageBox::information(&Dialog, mLocalization->tr("dialog.workshop_versions", "Workshop Versions"), "No active workshop.json was found in the live zone folder.");
 			return;
 		}
 
@@ -5579,7 +5626,7 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 
 	connect(ImportButton, &QPushButton::clicked, &Dialog, [&, this]()
 	{
-		const QString ImportPath = QFileDialog::getOpenFileName(&Dialog, "Import workshop.json", QString(), "workshop.json (workshop.json);;JSON Files (*.json)");
+		const QString ImportPath = QFileDialog::getOpenFileName(&Dialog, mLocalization->tr("dialog.import_workshop_json", "Import workshop.json"), QString(), "workshop.json (workshop.json);;JSON Files (*.json)");
 		if (ImportPath.isEmpty())
 			return;
 
@@ -5605,7 +5652,7 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 			Dialog.accept();
 		}
 		else
-			QMessageBox::warning(&Dialog, "Workshop Versions", "Unable to activate the selected version.");
+			QMessageBox::warning(&Dialog, mLocalization->tr("dialog.workshop_versions", "Workshop Versions"), "Unable to activate the selected version.");
 	});
 	connect(EditActiveButton, &QPushButton::clicked, &Dialog, [&]()
 	{
@@ -5650,10 +5697,55 @@ void mlMainWindow::ShowWorkshopVersionsDialog(QTreeWidgetItem* Item)
 		ShellExecute(NULL, "open", QString("\"%1\"").arg(QDir::toNativeSeparators(VersionsRoot)).toLatin1().constData(), "", NULL, SW_SHOWDEFAULT);
 	});
 
+	bool NewUploadRequested = false;
+	connect(NewUploadButton, &QPushButton::clicked, &Dialog, [&]()
+	{
+		const QString ActiveJson = QDir::cleanPath(QString("%1/workshop.json").arg(ActiveFolder));
+		if (QFileInfo(ActiveJson).isFile())
+		{
+			QMessageBox::StandardButton Answer = QMessageBox::question(&Dialog, "New Workshop Upload",
+				"This item already has a workshop.json. Open the publish dialog to update the existing listing?\n\n"
+				"Click No to create a fresh upload anyway (existing workshop data will be kept as a version).",
+				QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+			if (Answer == QMessageBox::Cancel)
+				return;
+		}
+		NewUploadRequested = true;
+		Dialog.accept();
+	});
+
 	QDialogButtonBox* CloseButtons = new QDialogButtonBox(QDialogButtonBox::Close, &Dialog);
 	connect(CloseButtons, SIGNAL(rejected()), &Dialog, SLOT(reject()));
 	Layout->addWidget(CloseButtons);
 	Dialog.exec();
+
+	if (NewUploadRequested)
+	{
+		QString Folder;
+		QString TargetType;
+		if (RawItemType == ML_ITEM_MAP)
+		{
+			Folder = QString("usermaps/%1").arg(EntryName);
+			TargetType = "map";
+			mFolderName = EntryName;
+		}
+		else
+		{
+			Folder = QString("mods/%1").arg(ContainerName);
+			TargetType = "mod";
+			mFolderName = ContainerName;
+		}
+		mWorkshopFolder = QString("%1/%2/zone").arg(mGamePath, Folder);
+		mType = TargetType;
+		mFileId = 0;
+		mTitle.clear();
+		mBriefingDescription.clear();
+		mSteamDescription.clear();
+		mThumbnail.clear();
+		mTags.clear();
+		mPostUploadSteamSyncPending = false;
+		ShowPublishDialog();
+	}
 }
 
 void mlMainWindow::UpdateDB()
@@ -5697,8 +5789,7 @@ void mlMainWindow::StartBuildThread(const QList<QPair<QString, QStringList>>& Co
 	{
 		if (IsGameLaunchCommand(Command.first, Command.second))
 		{
-			mPendingLaunchRequestedMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 1;
-			UpdateGameRunningState();
+			mPendingLaunchRequestedMs = 1;
 			break;
 		}
 	}
@@ -5732,7 +5823,7 @@ void mlMainWindow::SetActiveBuildButton(BuildLanguageMode Mode)
 {
 	ResetBuildButtons();
 	mActiveBuildButton = (Mode == BuildAllLanguages) ? mBuildButton : mBuildAllLanguagesButton;
-	mActiveBuildButton->setText("Cancel");
+	mActiveBuildButton->setText(LocalizationManager::Instance().tr("common.cancel", "Cancel"));
 	((mActiveBuildButton == mBuildButton) ? mBuildAllLanguagesButton : mBuildButton)->setEnabled(false);
 }
 
@@ -5768,21 +5859,21 @@ void mlMainWindow::UpdateBuildActionButtons()
 	const bool CanRunSelectedOnly = RunOnlyMode && HasRunnableSelection;
 	const bool CanAnalyzeCheckedTarget = HasCheckedTargets;
 
-	QString RunOnlyLabel = "Start Game";
-	QString RunOnlyPrimaryLabel = "Start Game";
+	QString RunOnlyLabel = mLocalization->tr("launcher.start_game", mLocalization->tr("game_control.start_game", "Start Game"));
+	QString RunOnlyPrimaryLabel = mLocalization->tr("launcher.start_game", mLocalization->tr("game_control.start_game", "Start Game"));
 	if (HasRunnableSelection)
 	{
 		const int ItemType = CurrentItem->data(0, Qt::UserRole).toInt();
-		RunOnlyLabel = (ItemType == ML_ITEM_MAP) ? "Start Map" : "Start Mod";
+		RunOnlyLabel = (ItemType == ML_ITEM_MAP) ? mLocalization->tr("launcher.start_map", mLocalization->tr("game_control.start_map", "Start Map")) : mLocalization->tr("launcher.start_mod", mLocalization->tr("game_control.start_mod", "Start Mod"));
 		RunOnlyPrimaryLabel = RunOnlyLabel;
 	}
 	QString BuildLanguageLabel = mBuildLanguage.trimmed().isEmpty() || mBuildLanguage.compare("All", Qt::CaseInsensitive) == 0
-		? QString("English")
-		: mBuildLanguage.trimmed();
+		? mLocalization->tr("launcher.lang_english", "English")
+		: mLocalization->tr(QString("launcher.lang_%1").arg(mBuildLanguage.trimmed().toLower()), mBuildLanguage.trimmed());
 	if (!BuildLanguageLabel.isEmpty())
 		BuildLanguageLabel[0] = BuildLanguageLabel[0].toUpper();
 
-	mBuildAllLanguagesButton->setText(RunOnlyMode ? RunOnlyPrimaryLabel : QString("Build (%1)").arg(BuildLanguageLabel));
+	mBuildAllLanguagesButton->setText(RunOnlyMode ? RunOnlyPrimaryLabel : mLocalization->tr("launcher.build_single", "Build (%1)").arg(BuildLanguageLabel));
 	mBuildAllLanguagesButton->setEnabled(CanBuild || CanRunSelectedOnly);
 	mBuildButton->setText(RunOnlyMode ? RunOnlyLabel : "Build (All)");
 	mBuildButton->setEnabled(RunOnlyMode ? CanRunSelectedOnly : CanBuild);
@@ -5791,7 +5882,7 @@ void mlMainWindow::UpdateBuildActionButtons()
 	if (mActionEditBuild)
 		mActionEditBuild->setEnabled(CanBuild || CanRunSelectedOnly);
 	if (mActionEditBuildAllLanguages)
-		mActionEditBuildAllLanguages->setText(RunOnlyMode ? RunOnlyPrimaryLabel : QString("Build (%1)").arg(BuildLanguageLabel));
+		mActionEditBuildAllLanguages->setText(RunOnlyMode ? RunOnlyPrimaryLabel : mLocalization->tr("launcher.build_single", "Build (%1)").arg(BuildLanguageLabel));
 	if (mActionEditBuildAllLanguages)
 		mActionEditBuildAllLanguages->setEnabled(RunOnlyMode ? CanRunSelectedOnly : CanBuild);
 	if (mActionEditInformation)
@@ -5850,7 +5941,30 @@ void mlMainWindow::ApplyLauncherLayout()
 	}
 	mAssetDockWidget->raise();
 	mOutputDockWidget->raise();
+
+	BuildBackupToolDock();
+	if (mBackupDockWidget)
+	{
+		addDockWidget(Qt::RightDockWidgetArea, mBackupDockWidget);
+		mBackupDockWidget->hide();
+	}
 }
+
+void mlMainWindow::BuildBackupToolDock()
+{
+	if (mBackupDockWidget)
+		return;
+
+	mBackupDockWidget = new QDockWidget(mLocalization->tr("common.backup_tool", "Backup Tool"), this);
+	mBackupDockWidget->setObjectName("BackupDockWidget");
+	mBackupDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
+	mBackupDockWidget->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+	mBackupDockWidget->setMinimumSize(560, 700);
+
+	BackupToolPanel* Panel = new BackupToolPanel(mGamePath, mBackupDockWidget);
+	mBackupDockWidget->setWidget(Panel);
+}
+
 
 QTreeWidgetItem* mlMainWindow::ActiveFileItem() const
 {
@@ -5922,12 +6036,12 @@ void mlMainWindow::RebuildCategoryTabs()
 				mCategoryTabs->setTabTextColor(Idx, Col);
 		}
 	};
-	AddTab("All", "all");
-	AddTab("Recent", "recent");
-	AddTab("Favorites", "favorites");
-	AddTab("ZM Maps", "zm-maps");
-	AddTab("MP Maps", "mp-maps");
-	AddTab("Mods", "mods");
+	AddTab(mLocalization->tr("category.all", "All"), "all");
+	AddTab(mLocalization->tr("category.recent", "Recent"), "recent");
+	AddTab(mLocalization->tr("category.favorites", "Favorites"), "favorites");
+	AddTab(mLocalization->tr("category.zm_maps", "ZM Maps"), "zm-maps");
+	AddTab(mLocalization->tr("category.mp_maps", "MP Maps"), "mp-maps");
+	AddTab(mLocalization->tr("category.mods", "Mods"), "mods");
 
 	const QList<QVariantMap> CustomTabDefs = LoadCustomTabDefs();
 	for (const QVariantMap& Tab : CustomTabDefs)
@@ -5945,7 +6059,7 @@ void mlMainWindow::RebuildCategoryTabs()
 				mCategoryTabs->setTabTextColor(Idx, Col);
 		}
 	}
-	const int AddTabIdx = mCategoryTabs->addTab("+");
+	const int AddTabIdx = mCategoryTabs->addTab(mLocalization->tr("common.add", "+"));
 	mCategoryTabs->setTabData(AddTabIdx, "__add-category-tab__");
 	mCategoryTabs->setTabToolTip(AddTabIdx, "Add custom tab");
 
@@ -6011,7 +6125,7 @@ void mlMainWindow::ShowCategoryTabEditDialog(int TabIndex)
 
 	// Build dialog
 	QDialog Dialog(this);
-	Dialog.setWindowTitle(IsNew ? "New Custom Tab" : (IsCustom ? "Edit Custom Tab" : "Edit Tab"));
+	Dialog.setWindowTitle(IsNew ? mLocalization->tr("dialog.new_custom_tab", "New Custom Tab") : (IsCustom ? "Edit Custom Tab" : mLocalization->tr("dialog.custom_tab", "Edit Tab")));
 	Dialog.resize(700, IsCustom ? 560 : 380);
 	Dialog.setMinimumSize(620, IsCustom ? 500 : 340);
 
@@ -6019,26 +6133,26 @@ void mlMainWindow::ShowCategoryTabEditDialog(int TabIndex)
 	Layout->setSpacing(8);
 
 	// Name
-	Layout->addWidget(new QLabel("Tab Name:", &Dialog));
+	Layout->addWidget(new QLabel(mLocalization->tr("dialog.tab_name", "Tab Name:"), &Dialog));
 	QLineEdit* NameEdit = new QLineEdit(CurrentName, &Dialog);
-	NameEdit->setPlaceholderText("e.g. My Maps");
+	NameEdit->setPlaceholderText(mLocalization->tr("dialog.tab_name_placeholder", "e.g. My Maps"));
 	Layout->addWidget(NameEdit);
 
 	// Icon
-	Layout->addWidget(new QLabel("Icon image:", &Dialog));
+	Layout->addWidget(new QLabel(mLocalization->tr("dialog.tab_icon", "Icon image:"), &Dialog));
 	QWidget* IconRow = new QWidget(&Dialog);
 	QHBoxLayout* IconRowLayout = new QHBoxLayout(IconRow);
 	IconRowLayout->setContentsMargins(0, 0, 0, 0);
 	IconRowLayout->setSpacing(6);
 	BackgroundDropLineEdit* IconEdit = new BackgroundDropLineEdit(CurrentIcon, IconRow);
-	IconEdit->setPlaceholderText("Drop an icon file here or browse...");
-	QLabel* IconPreview = new QLabel("None", IconRow);
+	IconEdit->setPlaceholderText(mLocalization->tr("settings.toolbar_icon_placeholder", "Drop an icon file here or browse..."));
+	QLabel* IconPreview = new QLabel(LocalizationManager::Instance().tr("common.none", "None"), IconRow);
 	IconPreview->setObjectName("BackgroundPreview");
 	IconPreview->setFixedSize(28, 28);
 	IconPreview->setAlignment(Qt::AlignCenter);
 	IconPreview->setToolTip("Current tab icon preview");
-	QPushButton* IconBrowseBtn = new QPushButton("Browse...", IconRow);
-	QPushButton* IconClearBtn = new QPushButton("Clear", IconRow);
+	QPushButton* IconBrowseBtn = new QPushButton(LocalizationManager::Instance().tr("common.browse", "Browse..."), IconRow);
+	QPushButton* IconClearBtn = new QPushButton(mLocalization->tr("common.clear", "Clear"), IconRow);
 	IconRowLayout->addWidget(IconEdit, 1);
 	IconRowLayout->addWidget(IconPreview);
 	IconRowLayout->addWidget(IconBrowseBtn);
@@ -6059,7 +6173,7 @@ void mlMainWindow::ShowCategoryTabEditDialog(int TabIndex)
 	RefreshIconPreview();
 
 	// Color
-	Layout->addWidget(new QLabel("Tab name color:", &Dialog));
+	Layout->addWidget(new QLabel(mLocalization->tr("dialog.tab_name_color", "Tab name color:"), &Dialog));
 	QWidget* ColorWidget = new QWidget(&Dialog);
 	QHBoxLayout* ColorRow = new QHBoxLayout(ColorWidget);
 	ColorRow->setContentsMargins(0, 0, 0, 0);
@@ -6069,7 +6183,7 @@ void mlMainWindow::ShowCategoryTabEditDialog(int TabIndex)
 	QPushButton* ColorBrowseButton = new QPushButton(ColorWidget);
 	ColorBrowseButton->setFixedSize(26, 26);
 	ColorBrowseButton->setToolTip("Pick tab name color");
-	QPushButton* ColorClearBtn = new QPushButton("Clear", ColorWidget);
+	QPushButton* ColorClearBtn = new QPushButton(mLocalization->tr("common.clear", "Clear"), ColorWidget);
 	ColorRow->addWidget(ColorEdit, 1);
 	ColorRow->addWidget(ColorBrowseButton);
 	ColorRow->addWidget(ColorClearBtn);
@@ -6094,7 +6208,7 @@ void mlMainWindow::ShowCategoryTabEditDialog(int TabIndex)
 	QListWidget* ItemsList = nullptr;
 	if (IsCustom)
 	{
-		Layout->addWidget(new QLabel("Maps and Mods in this tab:", &Dialog));
+		Layout->addWidget(new QLabel(mLocalization->tr("dialog.maps_mods_tab", "Maps and Mods in this tab:"), &Dialog));
 		ItemsList = new QListWidget(&Dialog);
 		ItemsList->setSelectionMode(QAbstractItemView::NoSelection);
 		ItemsList->setMinimumHeight(140);
@@ -6458,7 +6572,7 @@ void mlMainWindow::CheckForUpdates(bool UserInitiated)
 	{
 		SetFooterUpdateState("Update status: request already in progress");
 		if (UserInitiated)
-			QMessageBox::information(this, "Check for Updates", "An update request is already in progress.");
+			QMessageBox::information(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"), "An update request is already in progress.");
 		return;
 	}
 
@@ -6467,13 +6581,13 @@ void mlMainWindow::CheckForUpdates(bool UserInitiated)
 	{
 		SetFooterUpdateState("Update status: no API URL configured");
 		if (UserInitiated)
-			QMessageBox::information(this, "Check for Updates", "No update API URL is configured yet.");
+			QMessageBox::information(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"), "No update API URL is configured yet.");
 		return;
 	}
 
 	QSettings Settings;
 	Settings.setValue("UpdateCheck/LastCheckedUtc", QDateTime::currentDateTimeUtc());
-	SetFooterUpdateState("Checking for Update");
+	SetFooterUpdateState(mLocalization->tr("launcher.checking_for_update", "Checking for Update"));
 
 	QNetworkRequest Request{ QUrl(ApiUrl) };
 	Request.setHeader(QNetworkRequest::UserAgentHeader, QString("BO3-ModLauncher/%1").arg(kLauncherVersion));
@@ -6482,8 +6596,8 @@ void mlMainWindow::CheckForUpdates(bool UserInitiated)
 	QProgressDialog* ProgressDialog = NULL;
 	if (UserInitiated)
 	{
-		ProgressDialog = new QProgressDialog("Checking for launcher updates...", QString(), 0, 0, this);
-		ProgressDialog->setWindowTitle("Check for Updates");
+		ProgressDialog = new QProgressDialog(mLocalization->tr("launcher.checking_for_update_desc", "Checking for launcher updates..."), QString(), 0, 0, this);
+		ProgressDialog->setWindowTitle(mLocalization->tr("dialog.check_for_updates", "Check for Updates"));
 		ProgressDialog->setWindowModality(Qt::WindowModal);
 		ProgressDialog->setCancelButton(NULL);
 		ProgressDialog->setMinimumDuration(0);
@@ -6508,9 +6622,9 @@ void mlMainWindow::CheckForUpdates(bool UserInitiated)
 
 			if (Error != QNetworkReply::NoError)
 			{
-				SetFooterUpdateState(QString("Update check failed: %1").arg(ErrorText));
+				SetFooterUpdateState(mLocalization->tr("launcher.update_check_failed", "Update check failed: %1").arg(ErrorText));
 				if (UserInitiated)
-					QMessageBox::warning(this, "Check for Updates", QString("Unable to check for updates.\n\n%1").arg(ErrorText));
+					QMessageBox::warning(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"), QString("Unable to check for updates.\n\n%1").arg(ErrorText));
 				return;
 			}
 
@@ -6518,9 +6632,9 @@ void mlMainWindow::CheckForUpdates(bool UserInitiated)
 		const QJsonDocument Document = QJsonDocument::fromJson(ResponseBytes, &ParseError);
 			if (ParseError.error != QJsonParseError::NoError || !Document.isObject())
 			{
-				SetFooterUpdateState("Update check failed: invalid JSON");
+				SetFooterUpdateState(mLocalization->tr("launcher.update_check_failed_json", "Update check failed: invalid JSON"));
 				if (UserInitiated)
-					QMessageBox::warning(this, "Check for Updates", "Update response was not valid JSON.");
+					QMessageBox::warning(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"), "Update response was not valid JSON.");
 				return;
 			}
 
@@ -6536,53 +6650,53 @@ void mlMainWindow::HandleUpdateMetadata(const QJsonObject& Root, bool UserInitia
 
 	if (LatestVersion.isEmpty())
 	{
-		SetFooterUpdateState("Update check failed: version tag missing");
+		SetFooterUpdateState(mLocalization->tr("launcher.update_check_failed_version", "Update check failed: version tag missing"));
 		if (UserInitiated)
-			QMessageBox::warning(this, "Check for Updates", "Release metadata did not contain a version tag.");
+			QMessageBox::warning(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"), "Release metadata did not contain a version tag.");
 		return;
 	}
 
 	if (!IsNewerLauncherVersion(LatestVersion))
 	{
-		SetFooterUpdateState("Up to date");
+		SetFooterUpdateState(mLocalization->tr("footer.up_to_date", "Up to date"));
 		if (UserInitiated)
-			QMessageBox::information(this, "Check for Updates",
-				QString("You already have the latest launcher version.\n\nCurrent version: %1").arg(kLauncherVersion));
+			QMessageBox::information(this, mLocalization->tr("dialog.check_for_updates", "Check for Updates"),
+				mLocalization->tr("launcher.latest_version", "You already have the latest launcher version.\n\nCurrent version: %1").arg(kLauncherVersion));
 		return;
 	}
 
 	const QJsonObject Asset = SelectPrimaryReleaseAsset(Root.value("assets").toArray());
 	const QString DownloadUrl = Asset.value("browser_download_url").toString().trimmed();
 	const QString ReleasePageUrl = Root.value("html_url").toString().trimmed().isEmpty() ? UpdateReleasesPageUrl() : Root.value("html_url").toString().trimmed();
-	SetFooterUpdateState(QString("New Version available (v%1)").arg(LatestVersion), DownloadUrl, LatestVersion, ReleasePageUrl, true);
+	SetFooterUpdateState(mLocalization->tr("launcher.update_available", "New Version available (v%1)").arg(LatestVersion), DownloadUrl, LatestVersion, ReleasePageUrl, true);
 	if (statusBar())
-		statusBar()->showMessage(QString("Launcher update available: %1").arg(LatestVersion), 10000);
+		statusBar()->showMessage(mLocalization->tr("launcher.update_available_msg", "Launcher update available: %1").arg(LatestVersion), 10000);
 
 	QSettings Settings;
 	if (!UserInitiated && Settings.value("UpdateCheck/DismissedVersion").toString() == LatestVersion)
 		return;
 
 	const QString ReleaseBody = Root.value("body").toString().trimmed();
-	QString PromptText = QString("A new launcher version is available.\n\nCurrent version: %1\nLatest version: %2")
+	QString PromptText = mLocalization->tr("launcher.update_prompt", "A new launcher version is available.\n\nCurrent version: %1\nLatest version: %2")
 		.arg(kLauncherVersion, LatestVersion);
 	if (!ReleaseBody.isEmpty())
 	{
 		QString Summary = ReleaseBody;
 		if (Summary.count() > 600)
-			Summary = Summary.left(600).trimmed() + "...";
+			Summary = Summary.left(600).trimmed() + mLocalization->tr("common.browse", "...");
 		PromptText += QString("\n\nRelease notes:\n%1").arg(Summary);
 	}
-	PromptText += "\n\nDownload and install it now?";
+	PromptText += mLocalization->tr("launcher.update_prompt_install", "\n\nDownload and install it now?");
 
 	QMessageBox Prompt(this);
 	Prompt.setIcon(QMessageBox::Information);
-	Prompt.setWindowTitle("Launcher Update Available");
+	Prompt.setWindowTitle(mLocalization->tr("dialog.launcher_update_available", "Launcher Update Available"));
 	Prompt.setText(PromptText);
-	QPushButton* InstallNowButton = Prompt.addButton("Download && Install", QMessageBox::AcceptRole);
+	QPushButton* InstallNowButton = Prompt.addButton(mLocalization->tr("launcher.download_install", "Download && Install"), QMessageBox::AcceptRole);
 	QPushButton* OpenReleasesButton = NULL;
 	if (!ReleasePageUrl.isEmpty())
-		OpenReleasesButton = Prompt.addButton("Open Releases Page", QMessageBox::ActionRole);
-	QPushButton* LaterButton = Prompt.addButton("Later", QMessageBox::RejectRole);
+		OpenReleasesButton = Prompt.addButton(mLocalization->tr("launcher.open_releases_page", "Open Releases Page"), QMessageBox::ActionRole);
+	QPushButton* LaterButton = Prompt.addButton(mLocalization->tr("launcher.later", "Later"), QMessageBox::RejectRole);
 	Prompt.exec();
 
 	if (Prompt.clickedButton() == InstallNowButton)
@@ -6646,8 +6760,8 @@ void mlMainWindow::StartUpdateDownload(const QUrl& DownloadUrl, const QString& V
 	Request.setRawHeader("Accept", "application/octet-stream");
 	mUpdateDownloadReply = mUpdateNetworkAccess->get(Request);
 
-	mUpdateProgressDialog = new QProgressDialog(QString("Downloading launcher update %1...").arg(VersionLabel), "Cancel", 0, 100, this);
-	mUpdateProgressDialog->setWindowTitle("Downloading Update");
+	mUpdateProgressDialog = new QProgressDialog(QString("Downloading launcher update %1...").arg(VersionLabel), LocalizationManager::Instance().tr("common.cancel", "Cancel"), 0, 100, this);
+	mUpdateProgressDialog->setWindowTitle(mLocalization->tr("dialog.downloading_update", "Downloading Update"));
 	mUpdateProgressDialog->setWindowModality(Qt::WindowModal);
 	mUpdateProgressDialog->setMinimumDuration(0);
 	mUpdateProgressDialog->setValue(0);
@@ -6810,7 +6924,7 @@ void mlMainWindow::SetFooterUpdateState(const QString& Message, const QString& D
 
 	if (mFooterUpdateStatusLabel)
 	{
-		const QString FooterStateText = Message.trimmed().isEmpty() ? "Up to date" : Message.trimmed();
+		const QString FooterStateText = Message.trimmed().isEmpty() ? mLocalization->tr("footer.up_to_date", "Up to date") : Message.trimmed();
 		mFooterUpdateStatusLabel->setText(QString("v%1 - %2").arg(kLauncherVersion, FooterStateText));
 		mFooterUpdateStatusLabel->setStyleSheet(UpdateAvailable ? "color: #63d471; padding: 4px 8px; font-weight: 700;" : QString());
 	}
@@ -6821,7 +6935,7 @@ void mlMainWindow::SetFooterUpdateState(const QString& Message, const QString& D
 		const bool ShowDownloadButton = UpdateAvailable && CanDownload;
 		mFooterDownloadButton->setVisible(ShowDownloadButton);
 		if (CanDownload)
-			mFooterDownloadButton->setText("Download");
+			mFooterDownloadButton->setText(mLocalization->tr("footer.download", "Download"));
 	}
 
 	if (mFooterRefreshButton)
@@ -7034,7 +7148,11 @@ void mlMainWindow::OnBuildCommandFinished(const QString& Program, const QStringL
 		AddStatSeconds("Stats/TotalLightSeconds", DurationSeconds);
 	}
 	else if (IsGameLaunchCommand(Program, Arguments))
+	{
 		IncrementStat("Stats/TotalLauncherRuns");
+		mPendingLaunchRequestedMs = mStatsElapsedTimer.isValid() ? mStatsElapsedTimer.elapsed() : 1;
+		UpdateGameRunningState();
+	}
 }
 
 void mlMainWindow::StatsTick()
@@ -7193,7 +7311,7 @@ bool mlMainWindow::PromptForDisplayName(int ItemType, const QString& ContainerNa
 
 	const QString InternalName = DisplayTextForItem(ItemType, ContainerName, EntryName);
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Display Options");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.display_options", "Display Options"));
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 	QLabel* Intro = new QLabel(QString("Customize how '%1' appears in the launcher list.").arg(InternalName), &Dialog);
 	Intro->setWordWrap(true);
@@ -7215,9 +7333,9 @@ bool mlMainWindow::PromptForDisplayName(int ItemType, const QString& ContainerNa
 	ColorBrowseButton->setFixedSize(26, 26);
 	ColorBrowseButton->setToolTip("Pick selection color");
 	QToolButton* ColorHelpButton = new QToolButton(ColorWidget);
-	ColorHelpButton->setText("?");
+	ColorHelpButton->setText(mLocalization->tr("common.help", "?"));
 	ColorHelpButton->setToolTip("Colors only change how this map or mod appears inside the launcher list.");
-	QPushButton* ClearColorButton = new QPushButton("Clear", ColorWidget);
+	QPushButton* ClearColorButton = new QPushButton(mLocalization->tr("common.clear", "Clear"), ColorWidget);
 	ColorLayout->addWidget(ColorEdit, 1);
 	ColorLayout->addWidget(ColorBrowseButton);
 	ColorLayout->addWidget(ColorHelpButton);
@@ -7410,7 +7528,7 @@ QWidget* mlMainWindow::CreateItemTitleWidget(QTreeWidgetItem* Item, int ItemType
 	{
 		QToolButton* DisplayNameButton = new QToolButton(Widget);
 		DisplayNameButton->setObjectName("DisplayNameAddButton");
-			DisplayNameButton->setText("+");
+			DisplayNameButton->setText(mLocalization->tr("common.add", "+"));
 			DisplayNameButton->setToolTip("Add display name");
 			DisplayNameButton->setCursor(Qt::PointingHandCursor);
 			DisplayNameButton->setAutoRaise(false);
@@ -7859,40 +7977,40 @@ void mlMainWindow::OnEditReadyForPublish()
 	CollectCheckedOnly(mFileListWidget->invisibleRootItem());
 	if (CheckedItems.isEmpty())
 	{
-		QMessageBox::critical(this, "Publish Check", "No items are checked. Check at least one map or mod before using Publish Check.");
+		QMessageBox::critical(this, mLocalization->tr("dialog.publish_check", "Publish Check"), "No items are checked. Check at least one map or mod before using Publish Check.");
 		return;
 	}
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Publish Check");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.publish_check", "Publish Check"));
 	Dialog.resize(860, 320);
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 
-	QLabel* Intro = new QLabel("Prepare checked maps/mods before publishing. This pass is best used right before a Workshop upload.");
+	QLabel* Intro = new QLabel(mLocalization->tr("dialog.publish_check_intro", "Prepare checked maps/mods before publishing. This pass is best used right before a Workshop upload."));
 	Intro->setWordWrap(true);
 	Layout->addWidget(Intro);
 
-	QLabel* Checklist = new QLabel("Recommended before upload:\n- Make sure your thumbnail follows the proper guidelines, check the Upload and click the ? next to the thumbnail");
+	QLabel* Checklist = new QLabel(mLocalization->tr("dialog.publish_check_checklist", "Recommended before upload:\n- Make sure your thumbnail follows the proper guidelines, check the Upload and click the ? next to the thumbnail"));
 	Checklist->setWordWrap(true);
 	Checklist->setObjectName("InfoBanner");
 	Layout->addWidget(Checklist);
 
-	QCheckBox* RemoveXPaks = new QCheckBox("Remove XPaks");
+	QCheckBox* RemoveXPaks = new QCheckBox(mLocalization->tr("dialog.remove_xpaks", "Remove XPaks"));
 	RemoveXPaks->setChecked(true);
-	RemoveXPaks->setToolTip("Deletes generated .xpak files under the checked map/mod folders.");
+	RemoveXPaks->setToolTip(mLocalization->tr("tooltip.remove_xpaks", "Deletes generated .xpak files under the checked map/mod folders."));
 	Layout->addWidget(RemoveXPaks);
 
-	QCheckBox* CompileAllLanguages = new QCheckBox("Compile all languages");
+	QCheckBox* CompileAllLanguages = new QCheckBox(mLocalization->tr("dialog.compile_all_languages", "Compile all languages"));
 	CompileAllLanguages->setChecked(true);
-	CompileAllLanguages->setToolTip("Links the checked content for every supported language.");
+	CompileAllLanguages->setToolTip(mLocalization->tr("tooltip.compile_all_languages", "Links the checked content for every supported language."));
 	Layout->addWidget(CompileAllLanguages);
 
 	QCheckBox* BuildLights = NULL;
 	if (HasMapSelection)
 	{
-		BuildLights = new QCheckBox("Build lights");
+		BuildLights = new QCheckBox(mLocalization->tr("dialog.build_lights", "Build lights"));
 		BuildLights->setChecked(true);
-		BuildLights->setToolTip("Runs the lighting pass for checked maps before linking.");
+		BuildLights->setToolTip(mLocalization->tr("tooltip.build_lights", "Runs the lighting pass for checked maps before linking."));
 		Layout->addWidget(BuildLights);
 	}
 
@@ -8019,7 +8137,7 @@ void mlMainWindow::ContextMenuRequested(const QPoint& Position)
 		Menu->addAction(mActionFileLevelEditor);
 
 	if (ItemTypeId == ML_ITEM_MAP || ItemTypeId == ML_ITEM_MOD)
-		Menu->addAction("Edit Zone File", this, SLOT(OnOpenZoneFile()));
+		Menu->addAction(mLocalization->tr("context.edit_zone_file", "Edit Zone File"), this, SLOT(OnOpenZoneFile()));
 	QAction* PublishAction = Menu->addAction(QString("Publish %1").arg(ItemType));
 	connect(PublishAction, &QAction::triggered, this, [=]()
 	{
@@ -8039,12 +8157,13 @@ void mlMainWindow::ContextMenuRequested(const QPoint& Position)
 		OnEditPublish();
 	});
 	Menu->addAction(QString("Open %1 Folder").arg(ItemType), this, SLOT(OnOpenModRootFolder()));
+	Menu->addAction(QString("Duplicate %1...").arg(ItemType), this, SLOT(OnDuplicateItem()));
 	Menu->addAction(QString("Rename %1...").arg(ItemType), this, SLOT(OnRenameItem()));
 	Menu->addAction(QString("Analyze %1...").arg(ItemType), this, SLOT(OnAnalyzeItem()));
 	Menu->addAction(IsFavoriteEntry(GetItemFavoriteKey(Item)) ? "Remove Favorite" : "Add Favorite", this, SLOT(OnToggleFavorite()));
-	QAction* NotesAction = Menu->addAction("Notes...");
+	QAction* NotesAction = Menu->addAction(mLocalization->tr("context.notes", "Notes..."));
 	connect(NotesAction, &QAction::triggered, this, [=]() { EditNotesForItem(Item); });
-	QAction* EditWorkshopJsonAction = Menu->addAction("Edit workshop.json...");
+	QAction* EditWorkshopJsonAction = Menu->addAction(mLocalization->tr("context.edit_workshop_json", "Edit workshop.json..."));
 	connect(EditWorkshopJsonAction, &QAction::triggered, this, [=]()
 	{
 		const QString ItemFolder = (ItemTypeId == ML_ITEM_MAP)
@@ -8052,9 +8171,9 @@ void mlMainWindow::ContextMenuRequested(const QPoint& Position)
 			: QString("%1/mods/%2/zone").arg(mGamePath, GetItemContainerName(Item));
 		EditJsonTextDialog(this, QDir::cleanPath(QString("%1/workshop.json").arg(ItemFolder)), "Edit workshop.json");
 	});
-	QAction* WorkshopVersionsAction = Menu->addAction("Workshop Versions...");
+	QAction* WorkshopVersionsAction = Menu->addAction(mLocalization->tr("context.workshop_versions", "Workshop Versions..."));
 	connect(WorkshopVersionsAction, &QAction::triggered, this, [=]() { ShowWorkshopVersionsDialog(Item); });
-	Menu->addAction("Clean XPaks", this, SLOT(OnCleanXPaks()));
+	Menu->addAction(mLocalization->tr("context.clean_xpaks", "Clean XPaks"), this, SLOT(OnCleanXPaks()));
 	Menu->addSeparator();
 
 	QWidgetAction* DeleteAction = new QWidgetAction(Menu);
@@ -8088,9 +8207,24 @@ void mlMainWindow::ContextMenuRequested(const QPoint& Position)
 
 void mlMainWindow::OnFileAssetEditor()
 {
+	const QString ExePath = QString("%1/bin/AssetEditor_modtools.exe").arg(mToolsPath);
+	if (!QFileInfo::exists(ExePath))
+	{
+		QMessageBox::warning(this, "Asset Editor",
+			QString("Could not find AssetEditor_modtools.exe.\n\nExpected at:\n%1").arg(ExePath));
+		return;
+	}
 	QProcess* Process = new QProcess();
 	TrackProcessLifetime(Process, "Stats/AssetEditorLaunches", "Stats/AssetEditorSeconds");
-	Process->start(QString("%1/bin/AssetEditor_modtools.exe").arg(mToolsPath), QStringList());
+	Process->start(ExePath, QStringList());
+	if (!Process->waitForStarted(5000))
+	{
+		QMessageBox::warning(this, "Asset Editor",
+			QString("Failed to start Asset Editor.\n\n%1").arg(Process->errorString()));
+		Process->kill();
+		Process->waitForFinished(3000);
+		delete Process;
+	}
 }
 
 void mlMainWindow::OnFileLevelEditor()
@@ -8116,11 +8250,11 @@ void mlMainWindow::OnFileLevelEditor()
 	{
 		QMessageBox Prompt(this);
 		Prompt.setIcon(QMessageBox::Warning);
-		Prompt.setWindowTitle("Open Radiant");
-		Prompt.setText("No map selected.");
+		Prompt.setWindowTitle(mLocalization->tr("dialog.open_radiant", "Open Radiant"));
+		Prompt.setText(mLocalization->tr("dialog.no_map_selected", "No map selected."));
 		Prompt.setInformativeText("Select a map first, or open an empty Radiant session.");
 		QPushButton* EmptyButton = Prompt.addButton("Empty Radiant Map", QMessageBox::AcceptRole);
-		Prompt.addButton("Cancel", QMessageBox::RejectRole);
+		Prompt.addButton(LocalizationManager::Instance().tr("common.cancel", "Cancel"), QMessageBox::RejectRole);
 		Prompt.exec();
 		if (Prompt.clickedButton() == EmptyButton)
 			LaunchRadiant(QString(), QString());
@@ -8157,14 +8291,14 @@ void mlMainWindow::OnFileNew()
 	}
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("New Map or Mod");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.new_map_mod", "New Map or Mod"));
 	Dialog.resize(560, 300);
 	Dialog.setMinimumSize(500, 260);
 
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 	Layout->setContentsMargins(14, 8, 14, 10);
 	Layout->setSpacing(8);
-	QLabel* IntroLabel = new QLabel("Create a new map or mod.", &Dialog);
+	QLabel* IntroLabel = new QLabel(mLocalization->tr("dialog.new_map_mod_intro", "Create a new map or mod."), &Dialog);
 	IntroLabel->setWordWrap(true);
 	QFont IntroFont = IntroLabel->font();
 	IntroFont.setPointSize(IntroFont.pointSize() + 2);
@@ -8172,7 +8306,7 @@ void mlMainWindow::OnFileNew()
 	IntroLabel->setFont(IntroFont);
 	Layout->addWidget(IntroLabel);
 
-	QLabel* NamingLabel = new QLabel("Naming scheme: multiplayer maps use mp_*, zombie maps use zm_*, and mods use your mod folder name.", &Dialog);
+	QLabel* NamingLabel = new QLabel(mLocalization->tr("dialog.new_map_mod_naming", "Naming scheme: multiplayer maps use mp_*, zombie maps use zm_*, and mods use your mod folder name."), &Dialog);
 	NamingLabel->setWordWrap(true);
 	Layout->addWidget(NamingLabel);
 
@@ -8184,11 +8318,11 @@ void mlMainWindow::OnFileNew()
 
 	QLineEdit* NameWidget = new QLineEdit();
 	NameWidget->setValidator(new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_]*"), this));
-	NameWidget->setPlaceholderText("zm_example");
+	NameWidget->setPlaceholderText(mLocalization->tr("dialog.name_placeholder", "zm_example"));
 	FormLayout->addRow("Name:", NameWidget);
 
 	QLineEdit* DisplayNameWidget = new QLineEdit(&Dialog);
-	DisplayNameWidget->setPlaceholderText("Leviathan");
+	DisplayNameWidget->setPlaceholderText(mLocalization->tr("dialog.display_name_placeholder", "Leviathan"));
 	FormLayout->addRow("Display name:", DisplayNameWidget);
 
 	QLineEdit* ColorEdit = new QLineEdit(&Dialog);
@@ -8198,9 +8332,9 @@ void mlMainWindow::OnFileNew()
 	ColorBrowseButton->setFixedSize(26, 26);
 	ColorBrowseButton->setToolTip("Pick selection color");
 	QToolButton* ColorHelpButton = new QToolButton(&Dialog);
-	ColorHelpButton->setText("?");
+	ColorHelpButton->setText(mLocalization->tr("common.help", "?"));
 	ColorHelpButton->setToolTip("Colors only change how this map or mod appears inside the launcher list.");
-	QPushButton* ClearColorButton = new QPushButton("Clear", &Dialog);
+	QPushButton* ClearColorButton = new QPushButton(mLocalization->tr("common.clear", "Clear"), &Dialog);
 	QWidget* ColorRowWidget = new QWidget(&Dialog);
 	QHBoxLayout* ColorRowLayout = new QHBoxLayout(ColorRowWidget);
 	ColorRowLayout->setContentsMargins(0, 0, 0, 0);
@@ -8256,10 +8390,10 @@ void mlMainWindow::OnFileNew()
 	RefreshAutoFields();
 
 	QHBoxLayout* ButtonRow = new QHBoxLayout();
-	QPushButton* CancelButton = new QPushButton("Cancel", &Dialog);
+	QPushButton* CancelButton = new QPushButton(LocalizationManager::Instance().tr("common.cancel", "Cancel"), &Dialog);
 	ButtonRow->addWidget(CancelButton);
 	ButtonRow->addStretch();
-	QPushButton* CreateButton = new QPushButton("Create", &Dialog);
+	QPushButton* CreateButton = new QPushButton(mLocalization->tr("dialog.create", "Create"), &Dialog);
 	ButtonRow->addWidget(CreateButton);
 	Layout->addLayout(ButtonRow);
 	int RequestedCreationMode = -1;
@@ -8385,7 +8519,7 @@ void mlMainWindow::OnEditBuild()
 
 void mlMainWindow::OnEditBuildAllLanguages()
 {
-	StartBuild(BuildEnglishOnly);
+	StartBuild(BuildSelectedLanguage);
 }
 
 void mlMainWindow::OnSetModernTheme()
@@ -8480,6 +8614,8 @@ void mlMainWindow::StartBuild(BuildLanguageMode Mode)
 		for (const QString& Language : gLanguages)
 			LanguageArgs << "-language" << Language;
 	}
+	else if (Mode == BuildSelectedLanguage)
+		LanguageArgs << "-language" << mBuildLanguage;
 	else
 		LanguageArgs << "-language" << mBuildLanguage;
 
@@ -8558,8 +8694,15 @@ void mlMainWindow::StartBuild(BuildLanguageMode Mode)
 
 				if (ItemType == ML_ITEM_MOD_GROUP)
 				{
-					for (const QString& ZoneName : ModZoneNames(ModName))
-						Commands.append(QPair<QString, QStringList>(QString("%1/bin/linker_modtools.exe").arg(mToolsPath), QStringList() << LanguageArgs << "-fs_game" << ModName << "-modsource" << ZoneName));
+					for (int ChildIdx = 0; ChildIdx < Item->childCount(); ChildIdx++)
+					{
+						QTreeWidgetItem* Child = Item->child(ChildIdx);
+						if (Child->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked)
+						{
+							QString ZoneName = GetItemEntryName(Child);
+							Commands.append(QPair<QString, QStringList>(QString("%1/bin/linker_modtools.exe").arg(mToolsPath), QStringList() << LanguageArgs << "-fs_game" << ModName << "-modsource" << ZoneName));
+						}
+					}
 				}
 				else
 				{
@@ -8690,7 +8833,7 @@ void mlMainWindow::OnUGCRequestUGCDetails(SteamUGCRequestUGCDetailsResult_t* Req
 void mlMainWindow::ShowPublishDialog()
 {
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Publish Mod");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.publish_mod", "Publish Mod"));
 	Dialog.resize(1120, 780);
 	Dialog.setMinimumSize(1020, 720);
 
@@ -8703,21 +8846,21 @@ void mlMainWindow::ShowPublishDialog()
 	const QStringList BuiltLanguages = DetectBuiltLanguages(ContentRoot);
 	if (HasOnlyEnglishBuild(ContentRoot))
 	{
-		QLabel* WarningLabel = new QLabel("Warning: this item currently appears to have only English localized files built. Uploading now may ship English-only Workshop content.");
+		QLabel* WarningLabel = new QLabel(mLocalization->tr("dialog.warning_only_english", "Warning: this item currently appears to have only English localized files built. Uploading now may ship English-only Workshop content."));
 		WarningLabel->setWordWrap(true);
 		WarningLabel->setObjectName("WarningBanner");
 		Layout->addWidget(WarningLabel);
 	}
 	else if (BuiltLanguages.isEmpty())
 	{
-		QLabel* WarningLabel = new QLabel("Warning: no localized build folders were detected for this item. Verify your latest link output before uploading.");
+		QLabel* WarningLabel = new QLabel(mLocalization->tr("dialog.warning_no_localized", "Warning: no localized build folders were detected for this item. Verify your latest link output before uploading."));
 		WarningLabel->setWordWrap(true);
 		WarningLabel->setObjectName("WarningBanner");
 		Layout->addWidget(WarningLabel);
 	}
 
 	const bool AllLanguagesDetected = (BuiltLanguages.count() == ARRAYSIZE(gLanguages));
-	QLabel* SummaryLabel = new QLabel(QString("Detected languages: %1").arg(BuiltLanguages.isEmpty() ? "none" : BuiltLanguages.join(", ")));
+	QLabel* SummaryLabel = new QLabel(QString("Detected languages: %1").arg(BuiltLanguages.isEmpty() ? LocalizationManager::Instance().tr("common.none", "None") : BuiltLanguages.join(", ")));
 	SummaryLabel->setWordWrap(true);
 	SummaryLabel->setObjectName(AllLanguagesDetected ? "SuccessBanner" : "WarningBanner");
 	Layout->addWidget(SummaryLabel);
@@ -8731,8 +8874,8 @@ void mlMainWindow::ShowPublishDialog()
 	EditorLayout->setSpacing(12);
 
 	QHBoxLayout* VersionLayout = new QHBoxLayout();
-	VersionLayout->addWidget(new QLabel("Workshop Versions:"));
-	QPushButton* VersionManagerButton = new QPushButton("Open Version Manager");
+	VersionLayout->addWidget(new QLabel(mLocalization->tr("dialog.workshop_versions", "Workshop Versions:")));
+	QPushButton* VersionManagerButton = new QPushButton(mLocalization->tr("dialog.open_version_manager", "Open Version Manager"));
 	VersionLayout->addWidget(VersionManagerButton);
 	VersionLayout->addStretch(1);
 	EditorLayout->addLayout(VersionLayout);
@@ -8744,7 +8887,7 @@ void mlMainWindow::ShowPublishDialog()
 	QLineEdit* TitleWidget = new QLineEdit();
 	TitleWidget->setText(mTitle);
 	QToolButton* TitleHelpButton = new QToolButton();
-	TitleHelpButton->setText("?");
+	TitleHelpButton->setText(mLocalization->tr("common.help", "?"));
 	TitleHelpButton->setToolTip("Title tips");
 	QWidget* TitleRowWidget = new QWidget(&Dialog);
 	QHBoxLayout* TitleRowLayout = new QHBoxLayout(TitleRowWidget);
@@ -8758,9 +8901,9 @@ void mlMainWindow::ShowPublishDialog()
 	BriefingDescriptionWidget->setAcceptRichText(false);
 	BriefingDescriptionWidget->setPlainText(mBriefingDescription);
 	BriefingDescriptionWidget->setMinimumHeight(120);
-	BriefingDescriptionWidget->setPlaceholderText("Uploaded first. This is the in-game briefing description.");
+	BriefingDescriptionWidget->setPlaceholderText(mLocalization->tr("dialog.briefing_placeholder", "Uploaded first. This is the in-game briefing description."));
 	QToolButton* BriefingDescriptionHelpButton = new QToolButton();
-	BriefingDescriptionHelpButton->setText("?");
+	BriefingDescriptionHelpButton->setText(mLocalization->tr("common.help", "?"));
 	BriefingDescriptionHelpButton->setToolTip("Briefing description tips");
 	QWidget* BriefingDescriptionRowWidget = new QWidget(&Dialog);
 	QHBoxLayout* BriefingDescriptionRowLayout = new QHBoxLayout(BriefingDescriptionRowWidget);
@@ -8774,9 +8917,9 @@ void mlMainWindow::ShowPublishDialog()
 	SteamDescriptionWidget->setAcceptRichText(false);
 	SteamDescriptionWidget->setPlainText(mSteamDescription);
 	SteamDescriptionWidget->setMinimumHeight(160);
-	SteamDescriptionWidget->setPlaceholderText("Automatically pushed to the Workshop after upload. Leave blank to reuse the briefing description.");
+	SteamDescriptionWidget->setPlaceholderText(mLocalization->tr("dialog.steam_placeholder", "Automatically pushed to the Workshop after upload. Leave blank to reuse the briefing description."));
 	QToolButton* SteamDescriptionHelpButton = new QToolButton();
-	SteamDescriptionHelpButton->setText("?");
+	SteamDescriptionHelpButton->setText(mLocalization->tr("common.help", "?"));
 	SteamDescriptionHelpButton->setToolTip("Steam description tips");
 	QWidget* SteamDescriptionRowWidget = new QWidget(&Dialog);
 	QHBoxLayout* SteamDescriptionRowLayout = new QHBoxLayout(SteamDescriptionRowWidget);
@@ -8790,9 +8933,9 @@ void mlMainWindow::ShowPublishDialog()
 	ThumbnailEdit->setText(mThumbnail);
 
 	QToolButton* ThumbnailButton = new QToolButton();
-	ThumbnailButton->setText("...");
+	ThumbnailButton->setText(mLocalization->tr("common.browse", "..."));
 	QToolButton* ThumbnailHelpButton = new QToolButton();
-	ThumbnailHelpButton->setText("?");
+	ThumbnailHelpButton->setText(mLocalization->tr("common.help", "?"));
 	ThumbnailHelpButton->setToolTip(
 		"__**High Quality Steam Workshop Thumbnails:**__\n"
 		"**File Size:** Under 1MB ( Anything over will result in launcher giving the \"steam error code\" message )\n"
@@ -8834,7 +8977,7 @@ void mlMainWindow::ShowPublishDialog()
 	TagsRowLayout->setSpacing(6);
 	TagsRowLayout->addWidget(TagsWidget, 1);
 	QToolButton* TagsHelpButton = new QToolButton(TagsRowWidget);
-	TagsHelpButton->setText("?");
+	TagsHelpButton->setText(mLocalization->tr("common.help", "?"));
 	TagsHelpButton->setToolTip("Tag tips");
 	TagsRowLayout->addWidget(TagsHelpButton, 0, Qt::AlignTop);
 	FormLayout->addRow("Tags:", TagsRowWidget);
@@ -8847,7 +8990,7 @@ void mlMainWindow::ShowPublishDialog()
 	QHBoxLayout* SummaryLayout = new QHBoxLayout(SummaryPanel);
 	SummaryLayout->setContentsMargins(0, 0, 0, 0);
 	SummaryLayout->setSpacing(12);
-	QLabel* ThumbnailPreview = new QLabel("No Preview");
+	QLabel* ThumbnailPreview = new QLabel(mLocalization->tr("dialog.no_preview", "No Preview"));
 	ThumbnailPreview->setObjectName("BackgroundPreview");
 	ThumbnailPreview->setFixedSize(118, 118);
 	ThumbnailPreview->setAlignment(Qt::AlignCenter);
@@ -8865,7 +9008,7 @@ void mlMainWindow::ShowPublishDialog()
 	QVBoxLayout* SummaryTextLayout = new QVBoxLayout();
 	SummaryTextLayout->setContentsMargins(0, 0, 0, 0);
 	SummaryTextLayout->setSpacing(4);
-	QLabel* PreviewTitle = new QLabel("Steam Workshop Preview");
+	QLabel* PreviewTitle = new QLabel(mLocalization->tr("dialog.workshop_preview", "Steam Workshop Preview"));
 	SummaryTextLayout->addWidget(PreviewTitle);
 	QLabel* PreviewTitleValue = new QLabel(StripTreyarchColorCodes(mTitle));
 	PreviewTitleValue->setWordWrap(true);
@@ -8874,13 +9017,13 @@ void mlMainWindow::ShowPublishDialog()
 	QLabel* PreviewIdValue = new QLabel(QString("Workshop ID: %1").arg(mFileId ? QString::number(mFileId) : "new item"));
 	PreviewIdValue->setWordWrap(true);
 	SummaryTextLayout->addWidget(PreviewIdValue);
-	QLabel* PreviewTagsValue = new QLabel(QString("Tags: %1").arg(mTags.isEmpty() ? "none" : mTags.join(", ")));
+	QLabel* PreviewTagsValue = new QLabel(QString("Tags: %1").arg(mTags.isEmpty() ? LocalizationManager::Instance().tr("common.none", "None") : mTags.join(", ")));
 	PreviewTagsValue->setWordWrap(true);
 	SummaryTextLayout->addWidget(PreviewTagsValue);
 	SummaryTextLayout->addStretch(1);
 	SummaryLayout->addLayout(SummaryTextLayout, 1);
 	PreviewLayout->addWidget(SummaryPanel);
-	QLabel* DescriptionPreviewTitle = new QLabel("Steam Description Preview");
+	QLabel* DescriptionPreviewTitle = new QLabel(mLocalization->tr("dialog.steam_preview", "Steam Description Preview"));
 	PreviewLayout->addWidget(DescriptionPreviewTitle);
 	QTextBrowser* PreviewWidget = new QTextBrowser(PreviewPanel);
 	PreviewWidget->setObjectName("MarkdownPreview");
@@ -8899,7 +9042,7 @@ void mlMainWindow::ShowPublishDialog()
 		}
 		PreviewTitleValue->setText(StripTreyarchColorCodes(TitleWidget->text()));
 		PreviewIdValue->setText(QString("Workshop ID: %1").arg(mFileId ? QString::number(mFileId) : "new item"));
-		PreviewTagsValue->setText(QString("Tags: %1").arg(ActiveTags.isEmpty() ? "none" : ActiveTags.join(", ")));
+		PreviewTagsValue->setText(QString("Tags: %1").arg(ActiveTags.isEmpty() ? LocalizationManager::Instance().tr("common.none", "None") : ActiveTags.join(", ")));
 		PreviewWidget->setHtml(SteamMarkupToHtml(SteamDescriptionForUpload(BriefingDescriptionWidget->toPlainText(), SteamDescriptionWidget->toPlainText())));
 	};
 	connect(BriefingDescriptionWidget, &QTextEdit::textChanged, &Dialog, RefreshPreviewMeta);
@@ -8919,9 +9062,9 @@ void mlMainWindow::ShowPublishDialog()
 
 	QHBoxLayout* BottomButtonsLayout = new QHBoxLayout();
 	BottomButtonsLayout->addStretch(1);
-	QPushButton* SaveInfoButton = new QPushButton("Save Info", &Dialog);
-	QPushButton* CancelButton = new QPushButton("Cancel", &Dialog);
-	QPushButton* UploadButton = new QPushButton("Upload", &Dialog);
+	QPushButton* SaveInfoButton = new QPushButton(mLocalization->tr("dialog.save_info", "Save Info"), &Dialog);
+	QPushButton* CancelButton = new QPushButton(LocalizationManager::Instance().tr("common.cancel", "Cancel"), &Dialog);
+	QPushButton* UploadButton = new QPushButton(mLocalization->tr("dialog.upload", "Upload"), &Dialog);
 	UploadButton->setDefault(true);
 	UploadButton->setAutoDefault(true);
 	UploadButton->setStyleSheet("background:#2f8f47; border:1px solid #4fcb72; color:#ffffff; font-weight:700; padding:8px 18px; border-radius:8px;");
@@ -8939,7 +9082,7 @@ void mlMainWindow::ShowPublishDialog()
 	auto ShowThumbnailGuide = [this]()
 	{
 		QDialog GuideDialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-		GuideDialog.setWindowTitle("Thumbnail Guide");
+		GuideDialog.setWindowTitle(mLocalization->tr("dialog.thumbnail_guide", "Thumbnail Guide"));
 		GuideDialog.resize(640, 420);
 		QVBoxLayout* GuideLayout = new QVBoxLayout(&GuideDialog);
 		QTextBrowser* GuideText = new QTextBrowser(&GuideDialog);
@@ -9077,7 +9220,7 @@ void mlMainWindow::ShowPublishDialog()
 void mlMainWindow::OnEditOptions()
 {
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Options");
+	Dialog.setWindowTitle(mLocalization->tr("settings.title", "Options"));
 	Dialog.resize(980, 760);
 	Dialog.setMinimumWidth(920);
 
@@ -9106,14 +9249,14 @@ void mlMainWindow::OnEditOptions()
 	GeneralLayout->setContentsMargins(14, 14, 14, 14);
 	GeneralLayout->setSpacing(12);
 
-	GeneralLayout->addWidget(new QLabel("Pinned Sections"));
-	QCheckBox* ShowRecentsCheckbox = new QCheckBox("Enable Recents");
+	GeneralLayout->addWidget(new QLabel(mLocalization->tr("launcher.pinned_sections", "Pinned Sections")));
+	QCheckBox* ShowRecentsCheckbox = new QCheckBox(mLocalization->tr("launcher.enable_recents", "Enable Recents"));
 	ShowRecentsCheckbox->setChecked(Settings.value("ShowRecents", true).toBool());
 	GeneralLayout->addWidget(ShowRecentsCheckbox);
-	QCheckBox* ShowFavoritesCheckbox = new QCheckBox("Enable Favorites");
+	QCheckBox* ShowFavoritesCheckbox = new QCheckBox(mLocalization->tr("launcher.enable_favorites", "Enable Favorites"));
 	ShowFavoritesCheckbox->setChecked(Settings.value("ShowFavorites", true).toBool());
 	GeneralLayout->addWidget(ShowFavoritesCheckbox);
-	QCheckBox* ShowStartupQuoteCheckbox = new QCheckBox("Show inspirational quote on startup");
+	QCheckBox* ShowStartupQuoteCheckbox = new QCheckBox(mLocalization->tr("launcher.show_startup_quote", "Show inspirational quote on startup"));
 	ShowStartupQuoteCheckbox->setChecked(Settings.value("ShowStartupQuote", false).toBool());
 	ShowStartupQuoteCheckbox->setToolTip("Show a random quote when the launcher opens.");
 	GeneralLayout->addWidget(ShowStartupQuoteCheckbox);
@@ -9123,7 +9266,7 @@ void mlMainWindow::OnEditOptions()
 	GeneralLayout->addWidget(PinnedFrame);
 
 	QHBoxLayout* LanguageLayout = new QHBoxLayout();
-	LanguageLayout->addWidget(new QLabel("Build Language:"));
+	LanguageLayout->addWidget(new QLabel(mLocalization->tr("launcher.build_language", "Build Language:")));
 
 	QStringList Languages;
 	Languages << "All";
@@ -9138,14 +9281,14 @@ void mlMainWindow::OnEditOptions()
 	QFrame* ApeFrame = new QFrame();
 	ApeFrame->setFrameShape(QFrame::HLine);
 	GeneralLayout->addWidget(ApeFrame);
-	GeneralLayout->addWidget(new QLabel("APE"));
-	QLabel* ApeCacheLabel = new QLabel("Delete the Asset Property Editor cache file if APE needs a clean refresh.");
+	GeneralLayout->addWidget(new QLabel(mLocalization->tr("launcher.ape", "APE")));
+	QLabel* ApeCacheLabel = new QLabel(mLocalization->tr("launcher.ape_cache_desc", "Delete the Asset Property Editor cache file if APE needs a clean refresh."));
 	ApeCacheLabel->setWordWrap(true);
 	GeneralLayout->addWidget(ApeCacheLabel);
-	QPushButton* DeleteApeCacheButton = new QPushButton("Delete Cache");
+	QPushButton* DeleteApeCacheButton = new QPushButton(mLocalization->tr("launcher.delete_cache", "Delete Cache"));
 	GeneralLayout->addWidget(DeleteApeCacheButton, 0, Qt::AlignLeft);
 	GeneralLayout->addStretch(1);
-	AddSettingsPage("General", style()->standardIcon(QStyle::SP_FileDialogDetailedView), GeneralTab);
+	AddSettingsPage(mLocalization->tr("launcher.general", "General"), style()->standardIcon(QStyle::SP_FileDialogDetailedView), GeneralTab);
 
 	QList<ToolbarItemConfig> ToolbarItems = LoadToolbarItems();
 	int ToolbarSelectedIndex = -1;
@@ -9165,7 +9308,7 @@ void mlMainWindow::OnEditOptions()
 
 	auto ToolbarItemText = [&](const ToolbarItemConfig& Item) -> QString
 	{
-		QString Text = Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString("Custom Item")) : Item.Label;
+		QString Text = Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString(mLocalization->tr("toolbar.custom_item", "Custom Item"))) : mLocalization->tr("toolbar." + Item.Key, Item.Label);
 		if (Item.Hidden)
 			Text += " [hidden]";
 		return Text;
@@ -9187,13 +9330,13 @@ void mlMainWindow::OnEditOptions()
 	ToolbarDetailLayout->setSpacing(10);
 	ToolbarLayout->addLayout(ToolbarDetailLayout, 1);
 
-	QLabel* ToolbarNameLabel = new QLabel("Item:");
+	QLabel* ToolbarNameLabel = new QLabel(mLocalization->tr("settings.toolbar_item", "Item:"));
 	QLabel* ToolbarNameValue = new QLabel("-");
 	ToolbarNameValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	ToolbarDetailLayout->addWidget(ToolbarNameLabel);
 	ToolbarDetailLayout->addWidget(ToolbarNameValue);
 
-	QLabel* ToolbarFunctionLabel = new QLabel("Functionality:");
+	QLabel* ToolbarFunctionLabel = new QLabel(mLocalization->tr("settings.toolbar_functionality", "Functionality:"));
 	QLabel* ToolbarFunctionValue = new QLabel("-");
 	ToolbarFunctionValue->setWordWrap(true);
 	ToolbarFunctionValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -9201,15 +9344,15 @@ void mlMainWindow::OnEditOptions()
 	ToolbarDetailLayout->addWidget(ToolbarFunctionValue);
 
 	QHBoxLayout* ToolbarIconLayout = new QHBoxLayout();
-	ToolbarIconLayout->addWidget(new QLabel("Icon:"));
+	ToolbarIconLayout->addWidget(new QLabel(mLocalization->tr("settings.toolbar_icon", "Icon:")));
 	BackgroundDropLineEdit* ToolbarIconEdit = new BackgroundDropLineEdit();
-	ToolbarIconEdit->setPlaceholderText("Drop an icon file here or browse...");
+	ToolbarIconEdit->setPlaceholderText(mLocalization->tr("settings.toolbar_icon_placeholder", "Drop an icon file here or browse..."));
 	ToolbarIconLayout->addWidget(ToolbarIconEdit, 1);
-	QPushButton* ToolbarIconBrowse = new QPushButton("Browse...");
+	QPushButton* ToolbarIconBrowse = new QPushButton(mLocalization->tr("settings.toolbar_browse", LocalizationManager::Instance().tr("common.browse", "Browse...")));
 	ToolbarIconLayout->addWidget(ToolbarIconBrowse);
 	ToolbarDetailLayout->addLayout(ToolbarIconLayout);
 
-	QCheckBox* ToolbarHiddenCheck = new QCheckBox("Hide from toolbar");
+	QCheckBox* ToolbarHiddenCheck = new QCheckBox(mLocalization->tr("settings.toolbar_hide", "Hide from toolbar"));
 	ToolbarDetailLayout->addWidget(ToolbarHiddenCheck);
 
 	QFrame* ToolbarDivider = new QFrame();
@@ -9217,12 +9360,12 @@ void mlMainWindow::OnEditOptions()
 	ToolbarDetailLayout->addWidget(ToolbarDivider);
 
 	QHBoxLayout* ToolbarButtonsLayout = new QHBoxLayout();
-	QPushButton* ToolbarMoveUpButton = new QPushButton("Move Up");
-	QPushButton* ToolbarMoveDownButton = new QPushButton("Move Down");
-	QPushButton* ToolbarAddButton = new QPushButton("Add Custom Item");
-	QPushButton* ToolbarEditButton = new QPushButton("Edit Custom Item");
-	QPushButton* ToolbarRemoveButton = new QPushButton("Remove Custom Item");
-	QPushButton* ToolbarResetButton = new QPushButton("Reset Defaults");
+	QPushButton* ToolbarMoveUpButton = new QPushButton(mLocalization->tr("settings.toolbar_move_up", "Move Up"));
+	QPushButton* ToolbarMoveDownButton = new QPushButton(mLocalization->tr("settings.toolbar_move_down", "Move Down"));
+	QPushButton* ToolbarAddButton = new QPushButton(mLocalization->tr("settings.toolbar_add_custom", "Add Custom Item"));
+	QPushButton* ToolbarEditButton = new QPushButton(mLocalization->tr("settings.toolbar_edit_custom", "Edit Custom Item"));
+	QPushButton* ToolbarRemoveButton = new QPushButton(mLocalization->tr("settings.toolbar_remove_custom", "Remove Custom Item"));
+	QPushButton* ToolbarResetButton = new QPushButton(mLocalization->tr("settings.toolbar_reset_defaults", "Reset Defaults"));
 	ToolbarButtonsLayout->addWidget(ToolbarMoveUpButton);
 	ToolbarButtonsLayout->addWidget(ToolbarMoveDownButton);
 	ToolbarButtonsLayout->addWidget(ToolbarAddButton);
@@ -9287,7 +9430,7 @@ void mlMainWindow::OnEditOptions()
 		else
 		{
 			const ToolbarItemConfig& Item = ToolbarItems[ToolbarSelectedIndex];
-			ToolbarNameValue->setText(Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString("Custom Item")) : Item.Label);
+			ToolbarNameValue->setText(Item.Label.isEmpty() ? (Item.BuiltIn ? Item.BuiltInActionKey : QString(mLocalization->tr("toolbar.custom_item", "Custom Item"))) : mLocalization->tr("toolbar." + Item.Key, Item.Label));
 			ToolbarFunctionValue->setText(Item.BuiltIn
 				? QString("Built-in action: %1").arg(Item.BuiltInActionKey)
 				: (Item.FunctionScript.trimmed().isEmpty() ? QString("(no functionality yet)") : Item.FunctionScript.trimmed()));
@@ -9332,11 +9475,11 @@ void mlMainWindow::OnEditOptions()
 		QHBoxLayout* IconRowLayout = new QHBoxLayout(IconRow);
 		IconRowLayout->setContentsMargins(0, 0, 0, 0);
 		IconRowLayout->addWidget(IconEdit, 1);
-		QPushButton* IconBrowse = new QPushButton("Browse...", IconRow);
+		QPushButton* IconBrowse = new QPushButton(LocalizationManager::Instance().tr("common.browse", "Browse..."), IconRow);
 		IconRowLayout->addWidget(IconBrowse);
 
 		QPlainTextEdit* FunctionEdit = new QPlainTextEdit(Item->FunctionScript, &ItemDialog);
-		FunctionEdit->setPlaceholderText("One command per line. Supported forms: builtin:<action>, exe:\"path\" [args], url:<url>, file:<path>, folder:<path>.");
+		FunctionEdit->setPlaceholderText(mLocalization->tr("settings.function_placeholder", "One command per line. Supported forms: builtin:<action>, exe:\"path\" [args], url:<url>, file:<path>, folder:<path>."));
 		FunctionEdit->setMinimumHeight(240);
 
 		FormLayout->addRow("Name:", NameEdit);
@@ -9346,7 +9489,7 @@ void mlMainWindow::OnEditOptions()
 
 		QHBoxLayout* QuickAddLayout = new QHBoxLayout();
 		QToolButton* AddBuiltinButton = new QToolButton(&ItemDialog);
-		AddBuiltinButton->setText("Add Built-in");
+		AddBuiltinButton->setText(mLocalization->tr("dialog.add_builtin", "Add Built-in"));
 		AddBuiltinButton->setPopupMode(QToolButton::InstantPopup);
 		QMenu* BuiltInMenu = new QMenu(AddBuiltinButton);
 		for (const ToolbarBuiltinSpec& Spec : kToolbarBuiltinSpecs)
@@ -9362,11 +9505,11 @@ void mlMainWindow::OnEditOptions()
 		AddBuiltinButton->setMenu(BuiltInMenu);
 		QuickAddLayout->addWidget(AddBuiltinButton);
 
-		QPushButton* AddExecutableButton = new QPushButton("Add Executable", &ItemDialog);
+		QPushButton* AddExecutableButton = new QPushButton(mLocalization->tr("dialog.add_executable", "Add Executable"), &ItemDialog);
 		QuickAddLayout->addWidget(AddExecutableButton);
-		QPushButton* AddUrlButton = new QPushButton("Add URL", &ItemDialog);
+		QPushButton* AddUrlButton = new QPushButton(mLocalization->tr("dialog.add_url", "Add URL"), &ItemDialog);
 		QuickAddLayout->addWidget(AddUrlButton);
-		QPushButton* AddFolderButton = new QPushButton("Add Folder", &ItemDialog);
+		QPushButton* AddFolderButton = new QPushButton(mLocalization->tr("dialog.add_folder", "Add Folder"), &ItemDialog);
 		QuickAddLayout->addWidget(AddFolderButton);
 		QuickAddLayout->addStretch(1);
 		ItemLayout->addLayout(QuickAddLayout);
@@ -9395,7 +9538,7 @@ void mlMainWindow::OnEditOptions()
 		connect(AddUrlButton, &QPushButton::clicked, &ItemDialog, [&, FunctionEdit]()
 		{
 			bool Accepted = false;
-			const QString UrlText = QInputDialog::getText(&ItemDialog, "Add URL", "URL:", QLineEdit::Normal, QString(), &Accepted).trimmed();
+			const QString UrlText = QInputDialog::getText(&ItemDialog, mLocalization->tr("dialog.add_url", "Add URL"), "URL:", QLineEdit::Normal, QString(), &Accepted).trimmed();
 			if (Accepted && !UrlText.isEmpty())
 				AppendScriptLine(QString("url:%1").arg(UrlText));
 		});
@@ -9452,7 +9595,7 @@ void mlMainWindow::OnEditOptions()
 	{
 		ToolbarItemConfig NewItem;
 		NewItem.Key = QString("custom-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-		NewItem.Label = "Custom Item";
+		NewItem.Label = mLocalization->tr("toolbar.custom_item", "Custom Item");
 		NewItem.BuiltIn = false;
 		NewItem.Hidden = false;
 		if (!EditToolbarItemDialog(&NewItem, true))
@@ -9506,14 +9649,14 @@ void mlMainWindow::OnEditOptions()
 
 	RefreshToolbarList();
 	LoadToolbarSelection();
-	AddSettingsPage("Toolbar", style()->standardIcon(QStyle::SP_TitleBarMenuButton), ToolbarTab);
+	AddSettingsPage(mLocalization->tr("settings.toolbar", "Toolbar"), style()->standardIcon(QStyle::SP_TitleBarMenuButton), ToolbarTab);
 
 	QWidget* ThemesTab = new QWidget(&Dialog);
 	QVBoxLayout* ThemesLayout = new QVBoxLayout(ThemesTab);
 	ThemesLayout->setContentsMargins(14, 14, 14, 14);
 	ThemesLayout->setSpacing(12);
 
-	ThemesLayout->addWidget(new QLabel("Theme"));
+	ThemesLayout->addWidget(new QLabel(mLocalization->tr("settings.theme_label", "Theme")));
 	QHBoxLayout* ThemePickerLayout = new QHBoxLayout();
 	QComboBox* ThemeProfileCombo = new QComboBox(&Dialog);
 	for (const QString& ThemeProfileId : AvailableThemeProfileIds())
@@ -9521,23 +9664,23 @@ void mlMainWindow::OnEditOptions()
 	const int CurrentThemeIndex = ThemeProfileCombo->findData(CurrentThemeProfileId());
 	ThemeProfileCombo->setCurrentIndex(CurrentThemeIndex >= 0 ? CurrentThemeIndex : 0);
 	ThemePickerLayout->addWidget(ThemeProfileCombo, 1);
-	QPushButton* SaveThemeButton = new QPushButton("Save Theme");
+	QPushButton* SaveThemeButton = new QPushButton(mLocalization->tr("settings.save_theme", "Save Theme"));
 	SaveThemeButton->setToolTip("Save the current theme settings into the selected theme profile.");
 	ThemePickerLayout->addWidget(SaveThemeButton);
-	QPushButton* SaveThemeAsButton = new QPushButton("Save As New");
+	QPushButton* SaveThemeAsButton = new QPushButton(mLocalization->tr("settings.save_as_new", "Save As New"));
 	SaveThemeAsButton->setToolTip("Create a new saved theme from the current settings.");
 	ThemePickerLayout->addWidget(SaveThemeAsButton);
-	QPushButton* DeleteThemeButton = new QPushButton("Delete");
+	QPushButton* DeleteThemeButton = new QPushButton(mLocalization->tr("settings.delete", mLocalization->tr("settings.delete", mLocalization->tr("settings.delete", "Delete"))));
 	DeleteThemeButton->setToolTip("Delete the selected custom theme.");
 	ThemePickerLayout->addWidget(DeleteThemeButton);
 	ThemesLayout->addLayout(ThemePickerLayout);
 
 	QHBoxLayout* BaseThemeLayout = new QHBoxLayout();
-	BaseThemeLayout->addWidget(new QLabel("Base Style:"));
+	BaseThemeLayout->addWidget(new QLabel(mLocalization->tr("settings.base_style", "Base Style:")));
 	QComboBox* BaseThemeCombo = new QComboBox(&Dialog);
-	BaseThemeCombo->addItem("Original Updated", ThemeOriginalUpdated);
-	BaseThemeCombo->addItem("Original Classic", ThemeOriginalClassic);
-	BaseThemeCombo->addItem("Dark Modern", ThemeDarkModern);
+	BaseThemeCombo->addItem(mLocalization->tr("menu.theme_original_updated", "Original Updated"), ThemeOriginalUpdated);
+	BaseThemeCombo->addItem(mLocalization->tr("menu.theme_original_classic", "Original Classic"), ThemeOriginalClassic);
+	BaseThemeCombo->addItem(mLocalization->tr("menu.theme_dark_modern", "Dark Modern"), ThemeDarkModern);
 	BaseThemeCombo->setCurrentIndex(qMax(0, BaseThemeCombo->findData(mThemeMode)));
 	BaseThemeLayout->addWidget(BaseThemeCombo, 1);
 	ThemesLayout->addLayout(BaseThemeLayout);
@@ -9546,10 +9689,10 @@ void mlMainWindow::OnEditOptions()
 	ThemeFrame->setFrameShape(QFrame::HLine);
 	ThemesLayout->addWidget(ThemeFrame);
 
-	ThemesLayout->addWidget(new QLabel("Appearance"));
+	ThemesLayout->addWidget(new QLabel(mLocalization->tr("settings.appearance", "Appearance")));
 
 	QHBoxLayout* AccentLayout = new QHBoxLayout();
-	AccentLayout->addWidget(new QLabel("Accent Color:"));
+	AccentLayout->addWidget(new QLabel(mLocalization->tr("settings.accent_color", "Accent Color:")));
 	QLineEdit* AccentColorEdit = new QLineEdit(Settings.value("AccentColor", "#ff8a2a").toString());
 	AccentLayout->addWidget(AccentColorEdit);
 	QPushButton* AccentBrowseButton = new QPushButton();
@@ -9559,17 +9702,17 @@ void mlMainWindow::OnEditOptions()
 	AccentLayout->addWidget(AccentBrowseButton);
 	ThemesLayout->addLayout(AccentLayout);
 
-	QCheckBox* ShowItemTypeTags = new QCheckBox("Show Map / Mod tags");
+	QCheckBox* ShowItemTypeTags = new QCheckBox(mLocalization->tr("settings.show_tags", "Show Map / Mod tags"));
 	ShowItemTypeTags->setChecked(Settings.value("ShowItemTypeTags", true).toBool());
-	ShowItemTypeTags->setToolTip("Show the small Map/Mod label next to each main item name.");
+	ShowItemTypeTags->setToolTip(mLocalization->tr("tooltip.show_tags", "Show the small Map/Mod label next to each main item name."));
 	ThemesLayout->addWidget(ShowItemTypeTags);
-	QCheckBox* UseLegacyToolbarIcons = new QCheckBox("Use legacy toolbar icons");
+	QCheckBox* UseLegacyToolbarIcons = new QCheckBox(mLocalization->tr("settings.legacy_icons", "Use legacy toolbar icons"));
 	UseLegacyToolbarIcons->setChecked(Settings.value("UseLegacyToolbarIcons", false).toBool());
-	UseLegacyToolbarIcons->setToolTip("Switch the toolbar back to the older icon set instead of the new artwork.");
+	UseLegacyToolbarIcons->setToolTip(mLocalization->tr("tooltip.legacy_icons", "Switch the toolbar back to the older icon set instead of the new artwork."));
 	ThemesLayout->addWidget(UseLegacyToolbarIcons);
 
 	QHBoxLayout* AssetBackgroundLayout = new QHBoxLayout();
-	AssetBackgroundLayout->addWidget(new QLabel("List Background:"));
+	AssetBackgroundLayout->addWidget(new QLabel(mLocalization->tr("settings.list_background", "List Background:")));
 	BackgroundDropLineEdit* AssetBackgroundEdit = new BackgroundDropLineEdit(Settings.value("AssetTreeBackgroundImage", "").toString());
 	AssetBackgroundLayout->addWidget(AssetBackgroundEdit);
 	QSlider* AssetBackgroundOpacitySlider = new QSlider(Qt::Horizontal);
@@ -9582,13 +9725,13 @@ void mlMainWindow::OnEditOptions()
 	AssetBackgroundOpacity->setSuffix("%");
 	AssetBackgroundOpacity->setValue(Settings.value("AssetTreeBackgroundOpacity", 100).toInt());
 	AssetBackgroundLayout->addWidget(AssetBackgroundOpacity);
-	QLabel* AssetBackgroundPreview = new QLabel("None");
+	QLabel* AssetBackgroundPreview = new QLabel(LocalizationManager::Instance().tr("common.none", "None"));
 	AssetBackgroundPreview->setObjectName("BackgroundPreview");
 	AssetBackgroundPreview->setFixedSize(52, 52);
 	AssetBackgroundPreview->setAlignment(Qt::AlignCenter);
 	AssetBackgroundPreview->setToolTip("Current list background preview");
 	AssetBackgroundLayout->addWidget(AssetBackgroundPreview);
-	QPushButton* AssetBackgroundBrowse = new QPushButton("Browse...");
+	QPushButton* AssetBackgroundBrowse = new QPushButton(LocalizationManager::Instance().tr("common.browse", "Browse..."));
 	AssetBackgroundLayout->addWidget(AssetBackgroundBrowse);
 	QPushButton* AssetBackgroundRemove = new QPushButton("X");
 	AssetBackgroundRemove->setToolTip("Remove list background");
@@ -9597,7 +9740,7 @@ void mlMainWindow::OnEditOptions()
 	ThemesLayout->addLayout(AssetBackgroundLayout);
 
 	QHBoxLayout* LogBackgroundLayout = new QHBoxLayout();
-	LogBackgroundLayout->addWidget(new QLabel("Log Background:"));
+	LogBackgroundLayout->addWidget(new QLabel(mLocalization->tr("settings.log_background", "Log Background:")));
 	BackgroundDropLineEdit* LogBackgroundEdit = new BackgroundDropLineEdit(Settings.value("LogBackgroundImage", "").toString());
 	LogBackgroundLayout->addWidget(LogBackgroundEdit);
 	QSlider* LogBackgroundOpacitySlider = new QSlider(Qt::Horizontal);
@@ -9610,13 +9753,13 @@ void mlMainWindow::OnEditOptions()
 	LogBackgroundOpacity->setSuffix("%");
 	LogBackgroundOpacity->setValue(Settings.value("LogBackgroundOpacity", 100).toInt());
 	LogBackgroundLayout->addWidget(LogBackgroundOpacity);
-	QLabel* LogBackgroundPreview = new QLabel("None");
+	QLabel* LogBackgroundPreview = new QLabel(LocalizationManager::Instance().tr("common.none", "None"));
 	LogBackgroundPreview->setObjectName("BackgroundPreview");
 	LogBackgroundPreview->setFixedSize(52, 52);
 	LogBackgroundPreview->setAlignment(Qt::AlignCenter);
 	LogBackgroundPreview->setToolTip("Current log background preview");
 	LogBackgroundLayout->addWidget(LogBackgroundPreview);
-	QPushButton* LogBackgroundBrowse = new QPushButton("Browse...");
+	QPushButton* LogBackgroundBrowse = new QPushButton(LocalizationManager::Instance().tr("common.browse", "Browse..."));
 	LogBackgroundLayout->addWidget(LogBackgroundBrowse);
 	QPushButton* LogBackgroundRemove = new QPushButton("X");
 	LogBackgroundRemove->setToolTip("Remove log background");
@@ -9624,121 +9767,33 @@ void mlMainWindow::OnEditOptions()
 	LogBackgroundLayout->addWidget(LogBackgroundRemove);
 	ThemesLayout->addLayout(LogBackgroundLayout);
 
-	QFrame* LayoutFrame = new QFrame();
-	LayoutFrame->setFrameShape(QFrame::HLine);
-	ThemesLayout->addWidget(LayoutFrame);
-
-	ThemesLayout->addWidget(new QLabel("Layout"));
-	auto CreateLayoutPreviewIcon = [&](const QString& LayoutKey) -> QIcon
-	{
-		QPixmap Pixmap(64, 40);
-		Pixmap.fill(Qt::transparent);
-		QPainter Painter(&Pixmap);
-		Painter.setRenderHint(QPainter::Antialiasing, true);
-		Painter.setPen(QPen(QColor(90, 98, 108), 1));
-		Painter.setBrush(QColor(24, 28, 33));
-		Painter.drawRoundedRect(QRectF(1, 1, 62, 38), 6, 6);
-
-		auto DrawPanel = [&](const QRect& Rect, const QColor& Color)
-		{
-			Painter.setPen(Qt::NoPen);
-			Painter.setBrush(Color);
-			Painter.drawRoundedRect(Rect, 3, 3);
-		};
-
-		if (LayoutKey == "left-build-console")
-		{
-			DrawPanel(QRect(4, 4, 20, 32), QColor(42, 54, 68));
-			DrawPanel(QRect(27, 4, 12, 32), QColor(80, 62, 44));
-			DrawPanel(QRect(42, 4, 18, 32), QColor(22, 24, 27));
-		}
-		else if (LayoutKey == "left-console-build")
-		{
-			DrawPanel(QRect(4, 4, 20, 32), QColor(42, 54, 68));
-			DrawPanel(QRect(27, 4, 18, 32), QColor(22, 24, 27));
-			DrawPanel(QRect(48, 4, 12, 32), QColor(80, 62, 44));
-		}
-		else if (LayoutKey == "original")
-		{
-			DrawPanel(QRect(4, 4, 38, 16), QColor(40, 52, 66));
-			DrawPanel(QRect(45, 4, 15, 16), QColor(80, 62, 44));
-			DrawPanel(QRect(4, 23, 56, 13), QColor(22, 24, 27));
-		}
-		else
-		{
-			DrawPanel(QRect(4, 4, 38, 14), QColor(40, 52, 66));
-			DrawPanel(QRect(45, 4, 15, 14), QColor(80, 62, 44));
-			DrawPanel(QRect(4, 21, 56, 15), QColor(22, 24, 27));
-		}
-
-		return QIcon(Pixmap);
-	};
-
-	QButtonGroup* LayoutGroup = new QButtonGroup(&Dialog);
-	QHBoxLayout* LayoutOptionsLayout = new QHBoxLayout();
-	struct LayoutOption
-	{
-		const char* Key;
-		const char* Label;
-	};
-	const LayoutOption LayoutOptions[] =
-	{
-		{ "original", "Original" },
-		{ "left-build-console", "Maps / Build / Console" },
-		{ "left-console-build", "Maps / Console / Build" }
-	};
-	QHash<QString, QAbstractButton*> LayoutButtons;
-	for (int LayoutIdx = 0; LayoutIdx < static_cast<int>(sizeof(LayoutOptions) / sizeof(LayoutOptions[0])); LayoutIdx++)
-	{
-		const LayoutOption Option = LayoutOptions[LayoutIdx];
-		QToolButton* LayoutButton = new QToolButton(&Dialog);
-		LayoutButton->setCheckable(true);
-		LayoutButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-		LayoutButton->setIcon(CreateLayoutPreviewIcon(Option.Key));
-		LayoutButton->setIconSize(QSize(64, 40));
-		LayoutButton->setText(Option.Label);
-		LayoutButton->setAutoRaise(false);
-		LayoutButton->setMinimumWidth(120);
-		LayoutGroup->addButton(LayoutButton);
-		LayoutButtons.insert(Option.Key, LayoutButton);
-		LayoutOptionsLayout->addWidget(LayoutButton);
-	}
-	QString SavedLayoutKey = mLauncherLayout.trimmed().isEmpty() ? QString("original") : mLauncherLayout.trimmed().toLower();
-	if (SavedLayoutKey == "current")
-		SavedLayoutKey = "original";
-	if (LayoutButtons.contains(SavedLayoutKey))
-		LayoutButtons.value(SavedLayoutKey)->setChecked(true);
-	else if (LayoutButtons.contains("original"))
-		LayoutButtons.value("original")->setChecked(true);
-	ThemesLayout->addLayout(LayoutOptionsLayout);
-
 	QFrame* CustomCssFrame = new QFrame();
 	CustomCssFrame->setFrameShape(QFrame::HLine);
 	ThemesLayout->addWidget(CustomCssFrame);
 
-	ThemesLayout->addWidget(new QLabel("Custom CSS"));
+	ThemesLayout->addWidget(new QLabel(mLocalization->tr("settings.custom_css", "Custom CSS")));
 	QPlainTextEdit* CustomCssEdit = new QPlainTextEdit(Settings.value("CustomStylesheet", "").toString());
-	CustomCssEdit->setPlaceholderText("Add extra Qt stylesheet rules here...");
+	CustomCssEdit->setPlaceholderText(mLocalization->tr("settings.css_placeholder", "Add extra Qt stylesheet rules here..."));
 	CustomCssEdit->setMinimumHeight(120);
 	ThemesLayout->addWidget(CustomCssEdit);
-	QLabel* CustomCssHint = new QLabel("Tip: visible asset rows use custom widgets, so row styling usually needs #ItemRowWidget, #ItemTitleWidget, or #QuickActionStrip rather than only #AssetTree::item.");
+	QLabel* CustomCssHint = new QLabel(mLocalization->tr("settings.css_hint", "Tip: visible asset rows use custom widgets, so row styling usually needs #ItemRowWidget, #ItemTitleWidget, or #QuickActionStrip rather than only #AssetTree::item."));
 	CustomCssHint->setWordWrap(true);
 	ThemesLayout->addWidget(CustomCssHint);
-	QPushButton* ApplyCustomCssButton = new QPushButton("Apply CSS");
+	QPushButton* ApplyCustomCssButton = new QPushButton(mLocalization->tr("settings.apply_css", "Apply CSS"));
 	ApplyCustomCssButton->setToolTip("Apply the custom stylesheet immediately without closing options.");
 	ThemesLayout->addWidget(ApplyCustomCssButton, 0, Qt::AlignLeft);
 
 	ThemesLayout->addStretch(1);
-	AddSettingsPage("Themes", style()->standardIcon(QStyle::SP_DesktopIcon), ThemesTab);
+	AddSettingsPage(mLocalization->tr("settings.themes", "Themes"), style()->standardIcon(QStyle::SP_DesktopIcon), ThemesTab);
 
 	QWidget* ConsoleTab = new QWidget(&Dialog);
 	QVBoxLayout* ConsoleLayout = new QVBoxLayout(ConsoleTab);
 	ConsoleLayout->setContentsMargins(14, 14, 14, 14);
 	ConsoleLayout->setSpacing(12);
 
-	ConsoleLayout->addWidget(new QLabel("Console Style"));
-	QRadioButton* OriginalConsoleStyle = new QRadioButton("Original");
-	QRadioButton* ImprovedConsoleStyle = new QRadioButton("Improved");
+	ConsoleLayout->addWidget(new QLabel(mLocalization->tr("settings.console_style", "Console Style")));
+	QRadioButton* OriginalConsoleStyle = new QRadioButton(mLocalization->tr("settings.original", "Original"));
+	QRadioButton* ImprovedConsoleStyle = new QRadioButton(mLocalization->tr("settings.improved", "Improved"));
 	if (UseImprovedConsoleStyle(Settings))
 		ImprovedConsoleStyle->setChecked(true);
 	else
@@ -9750,7 +9805,7 @@ void mlMainWindow::OnEditOptions()
 	LogColorsFrame->setFrameShape(QFrame::HLine);
 	ConsoleLayout->addWidget(LogColorsFrame);
 
-	ConsoleLayout->addWidget(new QLabel("Log Colors"));
+	ConsoleLayout->addWidget(new QLabel(mLocalization->tr("settings.log_colors", "Log Colors")));
 	struct LogColorField
 	{
 		QString Label;
@@ -9798,7 +9853,149 @@ void mlMainWindow::OnEditOptions()
 	}
 
 	ConsoleLayout->addStretch(1);
-	AddSettingsPage("Console", style()->standardIcon(QStyle::SP_MessageBoxInformation), ConsoleTab);
+	AddSettingsPage(mLocalization->tr("settings.console", "Console"), style()->standardIcon(QStyle::SP_MessageBoxInformation), ConsoleTab);
+
+	QWidget* LocalizationTab = new QWidget(&Dialog);
+	QVBoxLayout* LocalizationLayout = new QVBoxLayout(LocalizationTab);
+
+	QStringList AllLocLangs;
+	AllLocLangs << "english" << "simplifiedchinese" << "traditionalchinese" << "japanese" << "polish" << "german" << "spanish" << "french" << "italian" << "portuguese" << "russian";
+	mLocalization->LoadAllLanguages(AllLocLangs);
+	mLocalization->LoadLanguage(mLauncherLanguage);
+	LocalizationLayout->setContentsMargins(14, 14, 14, 14);
+	LocalizationLayout->setSpacing(12);
+
+	QHBoxLayout* LangSelectLayout = new QHBoxLayout();
+	LangSelectLayout->addWidget(new QLabel(mLocalization->tr("launcher.launcher_language", "Launcher Language:")));
+	QComboBox* LauncherLangCombo = new QComboBox();
+	for (const QString& Lang : AllLocLangs)
+	{
+		QString DisplayName = mLocalization->tr(QString("launcher.lang_%1").arg(Lang), Lang);
+		LauncherLangCombo->addItem(DisplayName, Lang);
+	}
+	LauncherLangCombo->blockSignals(true);
+	LauncherLangCombo->setCurrentIndex(LauncherLangCombo->findData(mLauncherLanguage));
+	LauncherLangCombo->blockSignals(false);
+	LangSelectLayout->addWidget(LauncherLangCombo, 1);
+	LocalizationLayout->addLayout(LangSelectLayout);
+
+	QFrame* LocDivider = new QFrame();
+	LocDivider->setFrameShape(QFrame::HLine);
+	LocalizationLayout->addWidget(LocDivider);
+
+	QHBoxLayout* EditLangLayout = new QHBoxLayout();
+	EditLangLayout->addWidget(new QLabel(mLocalization->tr("launcher.language", "Language:")));
+
+	QComboBox* EditLangCombo = new QComboBox();
+	for (const QString& Lang : AllLocLangs)
+	{
+		QString NativeName = mLocalization->tr(QString("launcher.lang_%1").arg(Lang), Lang);
+		EditLangCombo->addItem(NativeName, Lang);
+	}
+	EditLangCombo->setCurrentIndex(0);
+	EditLangLayout->addWidget(EditLangCombo, 1);
+	LocalizationLayout->addLayout(EditLangLayout);
+
+	QTreeWidget* TranslationTable = new QTreeWidget(LocalizationTab);
+	TranslationTable->setColumnCount(3);
+	QStringList HeaderLabels;
+	HeaderLabels << mLocalization->tr("launcher.key", "Key")
+		<< mLocalization->tr("launcher.english_reference", "English (Reference)")
+		<< mLocalization->tr("launcher.translation", "Translation");
+	TranslationTable->setHeaderLabels(HeaderLabels);
+	QTreeWidgetItem* HeaderItem = TranslationTable->headerItem();
+	TranslationTable->setRootIsDecorated(false);
+	TranslationTable->setAlternatingRowColors(false);
+	TranslationTable->setUniformRowHeights(true);
+	TranslationTable->setColumnWidth(0, 220);
+	TranslationTable->setColumnWidth(1, 260);
+	TranslationTable->setColumnWidth(2, 260);
+	LocalizationLayout->addWidget(TranslationTable, 1);
+
+	auto PopulateTranslationTable = [&](const QString& Lang)
+	{
+		TranslationTable->blockSignals(true);
+		TranslationTable->clear();
+		QString LangDisplay = mLocalization->tr(QString("launcher.lang_%1").arg(Lang), Lang);
+		if (!LangDisplay.isEmpty())
+			LangDisplay[0] = LangDisplay[0].toUpper();
+		HeaderItem->setText(2, QString("Translated to %1").arg(LangDisplay));
+		QJsonObject Translations = mLocalization->GetTranslations(Lang);
+		QStringList Keys = Translations.keys();
+		Keys.sort();
+		for (const QString& Key : Keys)
+		{
+			if (Key == "language.native_name")
+				continue;
+			QTreeWidgetItem* Item = new QTreeWidgetItem(TranslationTable);
+			Item->setText(0, Key);
+			Item->setText(1, mLocalization->GetEnglishReference(Key));
+			Item->setText(2, Translations.value(Key).toString());
+			Item->setFlags(Item->flags() | Qt::ItemIsEditable);
+		}
+		TranslationTable->blockSignals(false);
+	};
+
+	connect(EditLangCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &Dialog, [&](int Index)
+	{
+		QString Lang = EditLangCombo->itemData(Index).toString();
+		PopulateTranslationTable(Lang);
+	});
+
+	connect(TranslationTable, &QTreeWidget::itemChanged, &Dialog, [&](QTreeWidgetItem* Item, int Column)
+	{
+		if (Column == 2 && Item)
+		{
+			QString Lang = EditLangCombo->currentData().toString();
+			mLocalization->SaveTranslation(Lang, Item->text(0), Item->text(2));
+		}
+	});
+
+	QPushButton* SaveTranslationsButton = new QPushButton(mLocalization->tr("launcher.save", "Save"));
+	LocalizationLayout->addWidget(SaveTranslationsButton, 0, Qt::AlignLeft);
+
+	connect(SaveTranslationsButton, &QPushButton::clicked, &Dialog, [&]()
+	{
+		QString Lang = EditLangCombo->currentData().toString();
+		for (int Row = 0; Row < TranslationTable->topLevelItemCount(); Row++)
+		{
+			QTreeWidgetItem* Item = TranslationTable->topLevelItem(Row);
+			if (Item)
+				mLocalization->SaveTranslation(Lang, Item->text(0), Item->text(2));
+		}
+		if (mLocalization->SaveTranslationFile(Lang))
+		{
+			QMessageBox::information(&Dialog, "Localization",
+				mLocalization->tr("launcher.translations_saved", "Translations saved successfully."));
+		}
+	});
+
+	connect(LauncherLangCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &Dialog, [&](int Index)
+	{
+		QString NewLang = LauncherLangCombo->itemData(Index).toString();
+		QString CurrentEditLang = EditLangCombo->currentData().toString();
+
+		mLocalization->LoadLanguage(NewLang);
+		mLauncherLanguage = NewLang;
+
+		LauncherLangCombo->blockSignals(true);
+		LauncherLangCombo->setItemText(Index, mLocalization->tr(QString("launcher.lang_%1").arg(NewLang), NewLang));
+		LauncherLangCombo->blockSignals(false);
+
+		for (int Row = 0; Row < TranslationTable->topLevelItemCount(); Row++)
+		{
+			QTreeWidgetItem* Item = TranslationTable->topLevelItem(Row);
+			if (Item)
+				mLocalization->SaveTranslation(CurrentEditLang, Item->text(0), Item->text(2));
+		}
+		PopulateTranslationTable(CurrentEditLang);
+
+		SaveTranslationsButton->setText(mLocalization->tr("launcher.save", "Save"));
+	});
+
+	PopulateTranslationTable("english");
+	LocalizationLayout->addStretch(1);
+	AddSettingsPage(mLocalization->tr("launcher.localization", "Localization"), style()->standardIcon(QStyle::SP_FileDialogDetailedView), LocalizationTab);
 
 	UpdateStatsTimers();
 	FlushCurrentItemTime();
@@ -9811,7 +10008,7 @@ void mlMainWindow::OnEditOptions()
 	QHBoxLayout* StatsHeaderLayout = new QHBoxLayout();
 	StatsHeaderLayout->setContentsMargins(0, 0, 0, 0);
 	StatsHeaderLayout->setSpacing(12);
-	StatsHeaderLayout->addWidget(new QLabel("My Stats"));
+	StatsHeaderLayout->addWidget(new QLabel(mLocalization->tr("settings.stats", "My Stats")));
 	StatsHeaderLayout->addStretch(1);
 	QLabel* CurrentOpenTimeLabel = new QLabel(StatsTab);
 	CurrentOpenTimeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -9820,7 +10017,7 @@ void mlMainWindow::OnEditOptions()
 	auto RefreshCurrentOpenTimeLabel = [this, CurrentOpenTimeLabel]()
 	{
 		const qint64 CurrentSeconds = mStatsElapsedTimer.isValid() ? qMax<qint64>(0, mStatsElapsedTimer.elapsed() / 1000) : 0;
-		CurrentOpenTimeLabel->setText(QString("Current open time: %1").arg(FormatDuration(CurrentSeconds)));
+		CurrentOpenTimeLabel->setText(mLocalization->tr("settings.current_open_time", "Current open time: %1").arg(FormatDuration(CurrentSeconds)));
 	};
 	RefreshCurrentOpenTimeLabel();
 	QTimer* StatsOpenTimer = new QTimer(&Dialog);
@@ -9828,7 +10025,7 @@ void mlMainWindow::OnEditOptions()
 	connect(StatsOpenTimer, &QTimer::timeout, &Dialog, [=]() { RefreshCurrentOpenTimeLabel(); });
 	StatsOpenTimer->start();
 	StatsLayout->addLayout(StatsHeaderLayout);
-	QLabel* StatsIntro = new QLabel("These stats are tracked locally on this PC while you use the launcher.");
+	QLabel* StatsIntro = new QLabel(mLocalization->tr("settings.stats_intro", "These stats are tracked locally on this PC while you use the launcher."));
 	StatsIntro->setWordWrap(true);
 	StatsLayout->addWidget(StatsIntro);
 
@@ -9901,38 +10098,38 @@ void mlMainWindow::OnEditOptions()
 		if (HasPublishedWorkshopId(false, ModName))
 			PublishedModCount++;
 	}
-	AddStatRow(0, "Launcher sessions:", QString::number(StatValue("Stats/SessionCount")));
-	AddStatRow(1, "Total time wasted:", FormatDuration(StatValue("Stats/TotalOpenSeconds")));
-	AddStatRow(2, "Total active time:", FormatDuration(StatValue("Stats/TotalActiveSeconds")));
-	AddStatRow(3, "Total idle time:", FormatDuration(StatValue("Stats/TotalIdleSeconds")));
-	AddStatRow(4, "Total compiles:", QString::number(StatValue("Stats/TotalCompiles")));
-	AddStatRow(5, "Total compile time:", FormatDuration(StatValue("Stats/TotalCompileSeconds")));
-	AddStatRow(6, "Total links:", QString::number(StatValue("Stats/TotalLinks")));
-	AddStatRow(7, "Total link time:", FormatDuration(StatValue("Stats/TotalLinkSeconds")));
-	AddStatRow(8, "Total lights:", QString::number(StatValue("Stats/TotalLights")));
-	AddStatRow(9, "Total light time:", FormatDuration(StatValue("Stats/TotalLightSeconds")));
-	AddStatRow(10, "Launcher runs:", QString::number(StatValue("Stats/TotalLauncherRuns")));
-	AddStatRow(11, "Total plays:", QString::number(StatValue("Stats/TotalGameLaunches")));
-	AddStatRow(12, "Total time in game:", FormatDuration(StatValue("Stats/TotalGameSeconds")));
-	AddStatRow(13, "Radiant launches:", QString::number(StatValue("Stats/RadiantLaunches")));
-	AddStatRow(14, "Time in Radiant:", FormatDuration(StatValue("Stats/RadiantSeconds")));
-	AddStatRow(15, "Asset Editor launches:", QString::number(StatValue("Stats/AssetEditorLaunches")));
-	AddStatRow(16, "Time in Asset Editor:", FormatDuration(StatValue("Stats/AssetEditorSeconds")));
-	AddStatRow(17, "Current maps:", QString::number(CurrentMapCount));
-	AddStatRow(18, "Current mods:", QString::number(CurrentModCount));
-	AddStatRow(19, "Workshop publishes:", QString::number(StatValue("Stats/TotalWorkshopPublishes")));
-	AddStatRow(20, "Published items:", QString::number(PublishedMapCount + PublishedModCount));
-	AddStatRow(21, "Published maps:", QString::number(PublishedMapCount));
-	AddStatRow(22, "Published mods:", QString::number(PublishedModCount));
+	AddStatRow(0, mLocalization->tr("stats.launcher_sessions", "Launcher sessions:"), QString::number(StatValue("Stats/SessionCount")));
+	AddStatRow(1, mLocalization->tr("stats.total_time_wasted", "Total time wasted:"), FormatDuration(StatValue("Stats/TotalOpenSeconds")));
+	AddStatRow(2, mLocalization->tr("stats.total_active_time", "Total active time:"), FormatDuration(StatValue("Stats/TotalActiveSeconds")));
+	AddStatRow(3, mLocalization->tr("stats.total_idle_time", "Total idle time:"), FormatDuration(StatValue("Stats/TotalIdleSeconds")));
+	AddStatRow(4, mLocalization->tr("stats.total_compiles", "Total compiles:"), QString::number(StatValue("Stats/TotalCompiles")));
+	AddStatRow(5, mLocalization->tr("stats.total_compile_time", "Total compile time:"), FormatDuration(StatValue("Stats/TotalCompileSeconds")));
+	AddStatRow(6, mLocalization->tr("stats.total_links", "Total links:"), QString::number(StatValue("Stats/TotalLinks")));
+	AddStatRow(7, mLocalization->tr("stats.total_link_time", "Total link time:"), FormatDuration(StatValue("Stats/TotalLinkSeconds")));
+	AddStatRow(8, mLocalization->tr("stats.total_lights", "Total lights:"), QString::number(StatValue("Stats/TotalLights")));
+	AddStatRow(9, mLocalization->tr("stats.total_light_time", "Total light time:"), FormatDuration(StatValue("Stats/TotalLightSeconds")));
+	AddStatRow(10, mLocalization->tr("stats.launcher_runs", "Launcher runs:"), QString::number(StatValue("Stats/TotalLauncherRuns")));
+	AddStatRow(11, mLocalization->tr("stats.total_plays", "Total plays:"), QString::number(StatValue("Stats/TotalGameLaunches")));
+	AddStatRow(12, mLocalization->tr("stats.total_time_in_game", "Total time in game:"), FormatDuration(StatValue("Stats/TotalGameSeconds")));
+	AddStatRow(13, mLocalization->tr("stats.radiant_launches", "Radiant launches:"), QString::number(StatValue("Stats/RadiantLaunches")));
+	AddStatRow(14, mLocalization->tr("stats.time_in_radiant", "Time in Radiant:"), FormatDuration(StatValue("Stats/RadiantSeconds")));
+	AddStatRow(15, mLocalization->tr("stats.asset_editor_launches", "Asset Editor launches:"), QString::number(StatValue("Stats/AssetEditorLaunches")));
+	AddStatRow(16, mLocalization->tr("stats.time_in_asset_editor", "Time in Asset Editor:"), FormatDuration(StatValue("Stats/AssetEditorSeconds")));
+	AddStatRow(17, mLocalization->tr("stats.current_maps", "Current maps:"), QString::number(CurrentMapCount));
+	AddStatRow(18, mLocalization->tr("stats.current_mods", "Current mods:"), QString::number(CurrentModCount));
+	AddStatRow(19, mLocalization->tr("stats.workshop_publishes", "Workshop publishes:"), QString::number(StatValue("Stats/TotalWorkshopPublishes")));
+	AddStatRow(20, mLocalization->tr("stats.published_items", "Published items:"), QString::number(PublishedMapCount + PublishedModCount));
+	AddStatRow(21, mLocalization->tr("stats.published_maps", "Published maps:"), QString::number(PublishedMapCount));
+	AddStatRow(22, mLocalization->tr("stats.published_mods", "Published mods:"), QString::number(PublishedModCount));
 	StatsLayout->addLayout(StatsGrid);
 
 	QFrame* StatsDivider = new QFrame();
 	StatsDivider->setFrameShape(QFrame::HLine);
 	StatsLayout->addWidget(StatsDivider);
-	StatsLayout->addWidget(new QLabel("Per Map / Mod Time"));
+	StatsLayout->addWidget(new QLabel(mLocalization->tr("settings.per_map_mod_time", "Per Map / Mod Time")));
 	QTreeWidget* StatsItemsTree = new QTreeWidget(StatsTab);
 	StatsItemsTree->setColumnCount(8);
-	StatsItemsTree->setHeaderLabels(QStringList() << "Item" << "Type" << "Time Wasted" << "In-Game" << "Plays" << "Radiant Time" << "Publishes" << "Published");
+	StatsItemsTree->setHeaderLabels(QStringList() << mLocalization->tr("settings.table_item", "Item") << mLocalization->tr("settings.table_type", "Type") << mLocalization->tr("settings.table_time_wasted", "Time Wasted") << mLocalization->tr("settings.table_in_game", "In-Game") << mLocalization->tr("settings.table_plays", "Plays") << mLocalization->tr("settings.table_radiant_time", "Radiant Time") << mLocalization->tr("settings.table_publishes", "Publishes") << mLocalization->tr("settings.table_published", "Published"));
 	StatsItemsTree->setRootIsDecorated(false);
 	StatsItemsTree->setAlternatingRowColors(false);
 	StatsItemsTree->setUniformRowHeights(true);
@@ -10025,7 +10222,7 @@ void mlMainWindow::OnEditOptions()
 	StatsItemsTree->sortItems(0, Qt::AscendingOrder);
 	StatsLayout->addWidget(StatsItemsTree, 1);
 	AddStatRow(23, "Favorite mod:", FavoriteModLabel);
-	AddSettingsPage("My Stats", style()->standardIcon(QStyle::SP_FileDialogInfoView), StatsTab);
+	AddSettingsPage(mLocalization->tr("settings.stats", "My Stats"), style()->standardIcon(QStyle::SP_FileDialogInfoView), StatsTab);
 
 	connect(SettingsNavList, &QListWidget::currentRowChanged, SettingsPages, &QStackedWidget::setCurrentIndex);
 	SettingsNavList->setCurrentRow(0);
@@ -10121,17 +10318,7 @@ void mlMainWindow::OnEditOptions()
 		Values.insert("AssetTreeBackgroundOpacity", AssetBackgroundOpacity->value());
 		Values.insert("LogBackgroundImage", LogBackgroundEdit->text().trimmed());
 		Values.insert("LogBackgroundOpacity", LogBackgroundOpacity->value());
-		QString SelectedLayoutKey = SavedLayoutKey;
-		for (int LayoutIdx = 0; LayoutIdx < static_cast<int>(sizeof(LayoutOptions) / sizeof(LayoutOptions[0])); LayoutIdx++)
-		{
-			const LayoutOption Option = LayoutOptions[LayoutIdx];
-			if (LayoutButtons.contains(Option.Key) && LayoutButtons.value(Option.Key)->isChecked())
-			{
-				SelectedLayoutKey = Option.Key;
-				break;
-			}
-		}
-		Values.insert("LauncherLayout", SelectedLayoutKey);
+		Values.insert("LauncherLayout", mLauncherLayout);
 		for (int FieldIdx = 0; FieldIdx < ARRAYSIZE(LogColorFields); FieldIdx++)
 		{
 			const LogColorField& Field = LogColorFields[FieldIdx];
@@ -10162,13 +10349,7 @@ void mlMainWindow::OnEditOptions()
 		AssetBackgroundOpacity->setValue(Values.value("AssetTreeBackgroundOpacity", 100).toInt());
 		LogBackgroundEdit->setText(Values.value("LogBackgroundImage", "").toString());
 		LogBackgroundOpacity->setValue(Values.value("LogBackgroundOpacity", 100).toInt());
-		const QString ThemeLayoutKey = Values.value("LauncherLayout", "original").toString().trimmed().toLower();
-		for (int LayoutIdx = 0; LayoutIdx < static_cast<int>(sizeof(LayoutOptions) / sizeof(LayoutOptions[0])); LayoutIdx++)
-		{
-			const LayoutOption Option = LayoutOptions[LayoutIdx];
-			if (LayoutButtons.contains(Option.Key))
-				LayoutButtons.value(Option.Key)->setChecked(Option.Key == ThemeLayoutKey);
-		}
+		mLauncherLayout = Values.value("LauncherLayout", "original").toString().trimmed().toLower();
 		for (int FieldIdx = 0; FieldIdx < ARRAYSIZE(LogColorFields); FieldIdx++)
 		{
 			const LogColorField& Field = LogColorFields[FieldIdx];
@@ -10281,10 +10462,27 @@ void mlMainWindow::OnEditOptions()
 		return;
 
 	mBuildLanguage = LanguageCombo->currentText();
+	{
+		QString oldLang = Settings.value("LauncherLanguage", "english").toString();
+		QString newLang = LauncherLangCombo->currentData().toString();
+		mLauncherLanguage = newLang;
+		Settings.setValue("LauncherLanguage", mLauncherLanguage);
+		if (newLang != oldLang)
+		{
+			Settings.sync();
+			QMessageBox::information(this, "Language",
+				"Please restart the launcher for the language change to take effect.");
+			QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList());
+			QCoreApplication::quit();
+			return;
+		}
+	}
+	mLocalization->LoadLanguage(mLauncherLanguage);
 	const QString SelectedThemeProfileId = ThemeProfileCombo->currentData().toString();
 	const QVariantMap SelectedThemeValues = CollectThemeValues();
 
 	Settings.setValue("BuildLanguage", mBuildLanguage);
+	Settings.setValue("LauncherLanguage", mLauncherLanguage);
 	Settings.setValue("ShowRecents", ShowRecentsCheckbox->isChecked());
 	Settings.setValue("ShowFavorites", ShowFavoritesCheckbox->isChecked());
 	Settings.setValue("ShowStartupQuote", ShowStartupQuoteCheckbox->isChecked());
@@ -10308,9 +10506,10 @@ void mlMainWindow::OnEditOptions()
 	}
 
 	CreateToolBar();
-	ApplyLauncherLayout();
+	RebuildCategoryTabs();
 	UpdateTheme();
 	PopulateFileList();
+	UpdateBuildActionButtons();
 }
 
 void mlMainWindow::UpdateTheme()
@@ -10707,12 +10906,12 @@ void mlMainWindow::UpdateCategorySummary(const QHash<QString, QVariantMap>& Look
 void mlMainWindow::OnEditDvars()
 {
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Dvar Options");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.dvar_options", "Dvar Options"));
 
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 
 	QLabel* Label = new QLabel(&Dialog);
-	Label->setText("Saved dvars are applied automatically whenever the launcher starts the game.\nEntries marked with * differ from their default value.");
+	Label->setText(mLocalization->tr("dialog.dvar_intro", "Saved dvars are applied automatically whenever the launcher starts the game.\nEntries marked with * differ from their default value."));
 	Layout->addWidget(Label);
 
 	QTreeWidget* DvarTree = new QTreeWidget(&Dialog);
@@ -10845,9 +11044,9 @@ void mlMainWindow::UpdateWorkshopItem(bool UploadToWorkshop)
 				break;
 
 			QMessageBox ThumbnailWarning(this);
-			ThumbnailWarning.setWindowTitle("Workshop Thumbnail Check");
+			ThumbnailWarning.setWindowTitle(mLocalization->tr("dialog.thumbnail_check", "Workshop Thumbnail Check"));
 			ThumbnailWarning.setIcon(QMessageBox::Warning);
-			ThumbnailWarning.setText("The current workshop thumbnail may fail upload.");
+			ThumbnailWarning.setText(mLocalization->tr("dialog.thumbnail_warning", "The current workshop thumbnail may fail upload."));
 			ThumbnailWarning.setInformativeText(Problems.join("\n"));
 			QAbstractButton* ContinueButton = ThumbnailWarning.addButton("Continue Anyway", QMessageBox::AcceptRole);
 			QAbstractButton* ReplaceButton = ThumbnailWarning.addButton("Choose New Thumbnail...", QMessageBox::ActionRole);
@@ -10949,7 +11148,7 @@ void mlMainWindow::UpdateWorkshopItem(bool UploadToWorkshop)
 		{
 		case EItemUpdateStatus::k_EItemUpdateStatusInvalid:
 			Dialog.setLabelText(
-				QString("Uploading workshop item '%1': %2").arg(QString::number(mFileId), QString("Invalid" )));
+				QString("Uploading workshop item '%1': %2").arg(QString::number(mFileId), QString(LocalizationManager::Instance().tr("common.invalid", "Invalid") )));
 			break;
 		case EItemUpdateStatus::k_EItemUpdateStatusPreparingConfig:
 			Dialog.setLabelText(
@@ -11080,161 +11279,174 @@ void mlMainWindow::OnHelpGuide()
 	};
 	const QList<GuidePage> Pages = {
 		{
-			"Overview",
-			"<h2>BO3 Mod Tools Black &mdash; What's New</h2>"
-			"<p>This launcher extends the original Treyarch mod tools launcher with quality-of-life features for map and mod creators.</p>"
-			"<p>Use the list on the left to jump to any feature. All settings persist between sessions unless noted otherwise.</p>"
+			mLocalization->tr("dialog.overview", "Overview"),
+			mLocalization->tr("guide.overview_body",
+				"<h2>BO3 Mod Tools Black &mdash; What's New</h2>"
+				"<p>This launcher extends the original Treyarch mod tools launcher with quality-of-life features for map and mod creators.</p>"
+				"<p>Use the list on the left to jump to any feature. All settings persist between sessions unless noted otherwise.</p>")
 		},
 		{
-			"Themes",
-			"<h2>Themes</h2>"
-			"<p>Three visual themes are available under the <b>Themes</b> menu in the menu bar:</p>"
-			"<ul>"
-			"<li><b>Modern</b> &mdash; Dark gray UI with orange accents (default). Designed for extended sessions.</li>"
-			"<li><b>Dark Modern</b> &mdash; Deep charcoal palette with a refined rounded style.</li>"
-			"<li><b>Classic</b> &mdash; Close to the original Treyarch launcher look.</li>"
-			"</ul>"
-			"<p>The active theme is saved and restored on next launch.</p>"
-			"<p>Additional cosmetic toggles live in <b>Options &rarr; Settings &rarr; Themes</b>:</p>"
-			"<ul>"
-			"<li><b>Show item type tags</b> &mdash; Displays Map / Mod labels next to each entry.</li>"
-			"<li><b>Use legacy toolbar icons</b> &mdash; Reverts toolbar icons to the classic set.</li>"
-			"<li><b>Background preview</b> &mdash; Shows the selected map/mod thumbnail behind the details panel.</li>"
-			"</ul>"
+			mLocalization->tr("guide.themes_title", "Themes"),
+			mLocalization->tr("guide.themes_body",
+				"<h2>Themes</h2>"
+				"<p>Three visual themes are available under the <b>Themes</b> menu in the menu bar:</p>"
+				"<ul>"
+				"<li><b>Modern</b> &mdash; Dark gray UI with orange accents (default). Designed for extended sessions.</li>"
+				"<li><b>Dark Modern</b> &mdash; Deep charcoal palette with a refined rounded style.</li>"
+				"<li><b>Classic</b> &mdash; Close to the original Treyarch launcher look.</li>"
+				"</ul>"
+				"<p>The active theme is saved and restored on next launch.</p>"
+				"<p>Additional cosmetic toggles live in <b>Options &rarr; Settings &rarr; Themes</b>:</p>"
+				"<ul>"
+				"<li><b>Show item type tags</b> &mdash; Displays Map / Mod labels next to each entry.</li>"
+				"<li><b>Use legacy toolbar icons</b> &mdash; Reverts toolbar icons to the classic set.</li>"
+				"<li><b>Background preview</b> &mdash; Shows the selected map/mod thumbnail behind the details panel.</li>"
+				"</ul>")
 		},
 		{
-			"Quick Launch Map",
-			"<h2>Quick Launch Map</h2>"
-			"<p>When a mod is selected in the list, a <b>Quick Launch Map</b> button appears in the details panel.</p>"
-			"<p>Click it to open a searchable popup with tabbed categories:</p>"
-			"<ul>"
-			"<li><b>General</b> &mdash; No Map / launch to main menu.</li>"
-			"<li><b>Zombies</b> &mdash; All stock zombie maps with their internal codes.</li>"
-			"<li><b>MP</b> &mdash; All stock multiplayer maps.</li>"
-			"<li><b>Campaign</b> &mdash; Story missions.</li>"
-			"</ul>"
-			"<p>Type in the search box to filter by name, map code, or detail text. The selected map is stored per session and shown on the button label.</p>"
-			"<p>Click <b>No Map</b> at the top of the popup to clear the selection.</p>"
+			mLocalization->tr("dialog.quick_launch_map", "Quick Launch Map"),
+			mLocalization->tr("guide.quick_launch_body",
+				"<h2>Quick Launch Map</h2>"
+				"<p>When a mod is selected in the list, a <b>Quick Launch Map</b> button appears in the details panel.</p>"
+				"<p>Click it to open a searchable popup with tabbed categories:</p>"
+				"<ul>"
+				"<li><b>General</b> &mdash; No Map / launch to main menu.</li>"
+				"<li><b>Zombies</b> &mdash; All stock zombie maps with their internal codes.</li>"
+				"<li><b>MP</b> &mdash; All stock multiplayer maps.</li>"
+				"<li><b>Campaign</b> &mdash; Story missions.</li>"
+				"</ul>"
+				"<p>Type in the search box to filter by name, map code, or detail text. The selected map is stored per session and shown on the button label.</p>"
+				"<p>Click <b>No Map</b> at the top of the popup to clear the selection.</p>")
 		},
 		{
-			"Favorites & Recents",
-			"<h2>Favorites &amp; Recents</h2>"
-			"<p>The <b>Favorites</b> and <b>Recents</b> tabs in the main list let you quickly reach frequently used entries.</p>"
-			"<ul>"
-			"<li>Right-click an entry and choose <b>Add to Favorites</b> to pin it.</li>"
-			"<li>Any build or launch action automatically records the entry to Recents.</li>"
-			"<li>Pinned full-mod entries expand their child zone files in both tabs for direct access.</li>"
-			"<li>Full-mod entries in Recents are normalized &mdash; multiple actions on the same mod count as one entry.</li>"
-			"</ul>"
+			mLocalization->tr("dialog.favorites_recents", "Favorites & Recents"),
+			mLocalization->tr("guide.favorites_body",
+				"<h2>Favorites &amp; Recents</h2>"
+				"<p>The <b>Favorites</b> and <b>Recents</b> tabs in the main list let you quickly reach frequently used entries.</p>"
+				"<ul>"
+				"<li>Right-click an entry and choose <b>Add to Favorites</b> to pin it.</li>"
+				"<li>Any build or launch action automatically records the entry to Recents.</li>"
+				"<li>Pinned full-mod entries expand their child zone files in both tabs for direct access.</li>"
+				"<li>Full-mod entries in Recents are normalized &mdash; multiple actions on the same mod count as one entry.</li>"
+				"</ul>")
 		},
 		{
-			"Tab Customization",
-			"<h2>Tab Customization</h2>"
-			"<p>The category bar supports custom tabs for organizing maps and mods.</p>"
-			"<ul>"
-			"<li>Click the <b>+</b> tab to create a new custom tab.</li>"
-			"<li>Double-click any existing tab to open the tab editor.</li>"
-			"<li>Right-click a tab for quick actions: <b>Edit</b> and <b>Delete</b>.</li>"
-			"<li>Delete is available for custom tabs only and always asks for confirmation.</li>"
-			"<li>In the editor you can set tab name, icon image, tab name color, and included map/mod entries.</li>"
-			"</ul>"
-			"<p>Tab changes are saved automatically and restored on next launch.</p>"
+			mLocalization->tr("dialog.tab_customization", "Tab Customization"),
+			mLocalization->tr("guide.tab_customization_body",
+				"<h2>Tab Customization</h2>"
+				"<p>The category bar supports custom tabs for organizing maps and mods.</p>"
+				"<ul>"
+				"<li>Click the <b>+</b> tab to create a new custom tab.</li>"
+				"<li>Double-click any existing tab to open the tab editor.</li>"
+				"<li>Right-click a tab for quick actions: <b>Edit</b> and <b>Delete</b>.</li>"
+				"<li>Delete is available for custom tabs only and always asks for confirmation.</li>"
+				"<li>In the editor you can set tab name, icon image, tab name color, and included map/mod entries.</li>"
+				"</ul>"
+				"<p>Tab changes are saved automatically and restored on next launch.</p>")
 		},
 		{
-			"Display Names & Notes",
-			"<h2>Display Names &amp; Notes</h2>"
-			"<p>Each map and mod can have a custom <b>display name</b> that appears in the list instead of the internal folder name.</p>"
-			"<p>A <b>selection color</b> can also be assigned to quickly identify entries visually.</p>"
-			"<p>Right-click an entry and choose <b>Information</b> to open the info dialog, where you can:</p>"
-			"<ul>"
-			"<li>Set or edit the display name and color.</li>"
-			"<li>Add free-text notes (stored locally per entry).</li>"
-			"<li>View compile and link statistics from the last build.</li>"
-			"<li>See estimated playtime accumulated via in-launcher game launches.</li>"
-			"</ul>"
+			mLocalization->tr("guide.display_names_title", "Display Names && Notes"),
+			mLocalization->tr("guide.display_names_body",
+				"<h2>Display Names &amp; Notes</h2>"
+				"<p>Each map and mod can have a custom <b>display name</b> that appears in the list instead of the internal folder name.</p>"
+				"<p>A <b>selection color</b> can also be assigned to quickly identify entries visually.</p>"
+				"<p>Right-click an entry and choose <b>Information</b> to open the info dialog, where you can:</p>"
+				"<ul>"
+				"<li>Set or edit the display name and color.</li>"
+				"<li>Add free-text notes (stored locally per entry).</li>"
+				"<li>View compile and link statistics from the last build.</li>"
+				"<li>See estimated playtime accumulated via in-launcher game launches.</li>"
+				"</ul>")
 		},
 		{
-			"Workshop Upload",
-			"<h2>Workshop Upload</h2>"
-			"<p>The <b>Publish to Workshop</b> workflow validates your package before upload:</p>"
-			"<ul>"
-			"<li>Thumbnail must exist and be a supported image type (JPG or PNG).</li>"
-			"<li>Dimensions must be at least 512&times;512 and no larger than 3840&times;2160.</li>"
-			"<li>File size must be under 1 MB.</li>"
-			"</ul>"
-			"<p>If issues are found you are prompted to <b>Continue anyway</b> or <b>Replace thumbnail</b>.</p>"
-			"<p>The <b>Ready for Publish</b> action in the toolbar runs an all-languages publish-prep build and can optionally bake map lights.</p>"
+			mLocalization->tr("dialog.workshop_upload", "Workshop Upload"),
+			mLocalization->tr("guide.workshop_body",
+				"<h2>Workshop Upload</h2>"
+				"<p>The <b>Publish to Workshop</b> workflow validates your package before upload:</p>"
+				"<ul>"
+				"<li>Thumbnail must exist and be a supported image type (JPG or PNG).</li>"
+				"<li>Dimensions must be at least 512&times;512 and no larger than 3840&times;2160.</li>"
+				"<li>File size must be under 1 MB.</li>"
+				"</ul>"
+				"<p>If issues are found you are prompted to <b>Continue anyway</b> or <b>Replace thumbnail</b>.</p>"
+				"<p>The <b>Ready for Publish</b> action in the toolbar runs an all-languages publish-prep build and can optionally bake map lights.</p>")
 		},
 		{
-			"Build Actions",
-			"<h2>Build Actions</h2>"
-			"<p>The toolbar and Build menu expose several compile modes:</p>"
-			"<ul>"
-			"<li><b>Build</b> &mdash; Compile and link the selected zone using the default language.</li>"
-			"<li><b>Build All Languages</b> &mdash; Runs the linker for all supported language variants.</li>"
-			"<li><b>Build Without Language</b> &mdash; Skips the language pass entirely.</li>"
-			"<li><b>Ready for Publish</b> &mdash; Full publish-prep pass with optional light baking.</li>"
-			"</ul>"
-			"<p>While a build is running, the <b>Cancel</b> button terminates the linker process. Build output is shown live in the console panel.</p>"
+			mLocalization->tr("guide.build_actions_title", "Build Actions"),
+			mLocalization->tr("guide.build_actions_body",
+				"<h2>Build Actions</h2>"
+				"<p>The toolbar and Build menu expose several compile modes:</p>"
+				"<ul>"
+				"<li><b>Build</b> &mdash; Compile and link the selected zone using the default language.</li>"
+				"<li><b>Build All Languages</b> &mdash; Runs the linker for all supported language variants.</li>"
+				"<li><b>Build Without Language</b> &mdash; Skips the language pass entirely.</li>"
+				"<li><b>Ready for Publish</b> &mdash; Full publish-prep pass with optional light baking.</li>"
+				"</ul>"
+				"<p>While a build is running, the <b>Cancel</b> button terminates the linker process. Build output is shown live in the console panel.</p>")
 		},
 		{
-			"Game Launch",
-			"<h2>Game Launch</h2>"
-			"<p>The <b>Start Game</b> button launches BlackOps3.exe as a detached process. This means:</p>"
-			"<ul>"
-			"<li>The <b>Build</b> button becomes available again while the game is running.</li>"
-			"<li>The launcher stays open and functional while you play-test.</li>"
-			"</ul>"
-			"<p>Online mode launches via Steam with <code>+set fs_game &lt;mod&gt;</code>. Workshop selections add <code>+set workshopid &lt;id&gt;</code> automatically.</p>"
-			"<p>Custom dvars can be added in <b>Options &rarr; Dvars</b> and are appended to every launch command.</p>"
+			mLocalization->tr("dialog.game_launch", "Game Launch"),
+			mLocalization->tr("guide.game_launch_body",
+				"<h2>Game Launch</h2>"
+				"<p>The <b>Start Game</b> button launches BlackOps3.exe as a detached process. This means:</p>"
+				"<ul>"
+				"<li>The <b>Build</b> button becomes available again while the game is running.</li>"
+				"<li>The launcher stays open and functional while you play-test.</li>"
+				"</ul>"
+				"<p>Online mode launches via Steam with <code>+set fs_game &lt;mod&gt;</code>. Workshop selections add <code>+set workshopid &lt;id&gt;</code> automatically.</p>"
+				"<p>Custom dvars can be added in <b>Options &rarr; Dvars</b> and are appended to every launch command.</p>")
 		},
 		{
-			"Console & Output",
-			"<h2>Console &amp; Output</h2>"
-			"<p>The output console at the bottom of the window shows linker and game log output.</p>"
-			"<ul>"
-			"<li>Output is color-coded by message type (errors in red, warnings in yellow, info in white).</li>"
-			"<li>Color coding can be toggled in <b>Options &rarr; Settings &rarr; Console Display</b>.</li>"
-			"<li>Multiple output tabs (Linker, Game Log, etc.) can be reordered by dragging.</li>"
-			"<li>The <b>Log Filters</b> button next to the tab bar hides or shows specific message categories.</li>"
-			"</ul>"
+			mLocalization->tr("dialog.console_output", "Console & Output"),
+			mLocalization->tr("guide.console_body",
+				"<h2>Console &amp; Output</h2>"
+				"<p>The output console at the bottom of the window shows linker and game log output.</p>"
+				"<ul>"
+				"<li>Output is color-coded by message type (errors in red, warnings in yellow, info in white).</li>"
+				"<li>Color coding can be toggled in <b>Options &rarr; Settings &rarr; Console Display</b>.</li>"
+				"<li>Multiple output tabs (Linker, Game Log, etc.) can be reordered by dragging.</li>"
+				"<li>The <b>Log Filters</b> button next to the tab bar hides or shows specific message categories.</li>"
+				"</ul>")
 		},
 		{
-			"Toolbar Customization",
-			"<h2>Toolbar Customization</h2>"
-			"<p>Right-click the toolbar to open the <b>Customize Toolbar</b> dialog.</p>"
-			"<ul>"
-			"<li>Built-in actions can be shown or hidden.</li>"
-			"<li>Custom items can be added to chain scripts, executables, URLs, files, or folders.</li>"
-			"<li>Custom item types: <code>builtin:</code>, <code>exe:</code>, <code>url:</code>, <code>file:</code>, <code>folder:</code>.</li>"
-			"<li>All customizations are saved in settings and restored on next launch.</li>"
-			"</ul>"
-			"<p>The <b>Extra Tools</b> dropdown in the toolbar provides quick access to Radiant, the Asset Exporter, and other tools.</p>"
+			mLocalization->tr("dialog.toolbar_customization", "Toolbar Customization"),
+			mLocalization->tr("guide.toolbar_body",
+				"<h2>Toolbar Customization</h2>"
+				"<p>Right-click the toolbar to open the <b>Customize Toolbar</b> dialog.</p>"
+				"<ul>"
+				"<li>Built-in actions can be shown or hidden.</li>"
+				"<li>Custom items can be added to chain scripts, executables, URLs, files, or folders.</li>"
+				"<li>Custom item types: <code>builtin:</code>, <code>exe:</code>, <code>url:</code>, <code>file:</code>, <code>folder:</code>.</li>"
+				"<li>All customizations are saved in settings and restored on next launch.</li>"
+				"</ul>"
+				"<p>The <b>Extra Tools</b> dropdown in the toolbar provides quick access to Radiant, the Asset Exporter, and other tools.</p>")
 		},
 		{
-			"Auto Updates",
-			"<h2>Auto Updates</h2>"
-			"<p>The launcher checks for updates automatically on startup (can be disabled in <b>Options &rarr; Settings &rarr; General</b>).</p>"
-			"<p>When an update is available, a banner appears in the status bar. Click it or use <b>Help &rarr; Check for Updates</b> to review and install.</p>"
-			"<p>The updater is a separate <code>LauncherUpdater.exe</code> process that:</p>"
-			"<ul>"
-			"<li>Waits for the launcher to exit before applying files.</li>"
-			"<li>Creates a backup of replaced files.</li>"
-			"<li>Rolls back automatically if anything fails.</li>"
-			"<li>Restarts the launcher when done.</li>"
-			"</ul>"
+			mLocalization->tr("dialog.auto_updates", "Auto Updates"),
+			mLocalization->tr("guide.auto_updates_body",
+				"<h2>Auto Updates</h2>"
+				"<p>The launcher checks for updates automatically on startup (can be disabled in <b>Options &rarr; Settings &rarr; General</b>).</p>"
+				"<p>When an update is available, a banner appears in the status bar. Click it or use <b>Help &rarr; Check for Updates</b> to review and install.</p>"
+				"<p>The updater is a separate <code>LauncherUpdater.exe</code> process that:</p>"
+				"<ul>"
+				"<li>Waits for the launcher to exit before applying files.</li>"
+				"<li>Creates a backup of replaced files.</li>"
+				"<li>Rolls back automatically if anything fails.</li>"
+				"<li>Restarts the launcher when done.</li>"
+				"</ul>")
 		},
 		{
-			"Startup Quotes",
-			"<h2>Startup Quotes</h2>"
-			"<p>An optional inspirational quote can be shown each time the launcher starts.</p>"
-			"<p>Enable this in <b>Options &rarr; Settings &rarr; General &rarr; Show startup quote</b>.</p>"
-			"<p>This option is off by default.</p>"
+			mLocalization->tr("dialog.startup_quotes", "Startup Quotes"),
+			mLocalization->tr("guide.startup_quotes_body",
+				"<h2>Startup Quotes</h2>"
+				"<p>An optional inspirational quote can be shown each time the launcher starts.</p>"
+				"<p>Enable this in <b>Options &rarr; Settings &rarr; General &rarr; Show startup quote</b>.</p>"
+				"<p>This option is off by default.</p>")
 		},
 	};
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
-	Dialog.setWindowTitle("Guide \342\200\224 BO3 Mod Tools Black");
+	Dialog.setWindowTitle(mLocalization->tr("dialog.guide", "Guide -- BO3 Mod Tools Black"));
 	Dialog.resize(860, 560);
 	Dialog.setMinimumSize(700, 420);
 
@@ -11279,7 +11491,7 @@ void mlMainWindow::OnHelpGuide()
 
 	NavList->setCurrentRow(0);
 
-	QPushButton* CloseBtn = new QPushButton("Close", &Dialog);
+	QPushButton* CloseBtn = new QPushButton(mLocalization->tr("dialog.close", "Close"), &Dialog);
 	connect(CloseBtn, &QPushButton::clicked, &Dialog, &QDialog::accept);
 
 	QVBoxLayout* RightLayout = new QVBoxLayout();
@@ -11389,7 +11601,20 @@ void mlMainWindow::OnRunMapOrMod()
 	QTreeWidgetItem* Item = ActiveFileItem();
 	if (!Item)
 		return;
-	if (ItemCheckState(Item) != Qt::Checked)
+
+	auto HasCheckedChild = [](QTreeWidgetItem* Parent) -> bool
+	{
+		for (int i = 0; i < Parent->childCount(); i++)
+		{
+			if (Parent->child(i)->data(0, ML_ITEM_CHECKSTATE_ROLE).toInt() == Qt::Checked)
+				return true;
+		}
+		return false;
+	};
+
+	const bool ItemOk = ItemCheckState(Item) == Qt::Checked
+		|| (Item->data(0, Qt::UserRole).toInt() != ML_ITEM_MAP && HasCheckedChild(Item));
+	if (!ItemOk)
 	{
 		QMessageBox::information(this, "Start", "Check the selected map or mod first to launch it.");
 		return;
@@ -11533,11 +11758,121 @@ void mlMainWindow::OnDelete()
 		Folder = QString("%1/mods/%2").arg(mGamePath, ModName);
 	}
 
-	if (!ConfirmDestructiveActionTwice(this, "Delete Folder", QString("folder '%1'").arg(QDir::toNativeSeparators(Folder)), "This deletes the folder and all of its contents."))
+	if (!ConfirmDestructiveActionTwice(this, mLocalization->tr("context.delete_folder", "Delete Folder"), QString("folder '%1'").arg(QDir::toNativeSeparators(Folder)), "This deletes the folder and all of its contents."))
 		return;
 
 	QDir(Folder).removeRecursively();
 	PopulateFileList();
+}
+
+void mlMainWindow::OnDuplicateItem()
+{
+	QTreeWidgetItem* Item = ActiveFileItem();
+	if (!Item)
+		return;
+
+	const int RawItemType = Item->data(0, Qt::UserRole).toInt();
+	if (RawItemType != ML_ITEM_MAP && RawItemType != ML_ITEM_MOD && RawItemType != ML_ITEM_MOD_GROUP)
+		return;
+
+	const bool IsMap = (RawItemType == ML_ITEM_MAP);
+	const QString CurrentName = IsMap ? GetItemEntryName(Item) : GetItemContainerName(Item);
+	const QString CurrentFavoriteKey = GetItemFavoriteKey(Item);
+
+	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
+	Dialog.setWindowTitle(IsMap ? "Duplicate Map" : "Duplicate Mod");
+	Dialog.resize(860, 380);
+	Dialog.setMinimumSize(800, 360);
+	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
+
+	QLabel* IntroLabel = new QLabel(
+		QString("Duplicate '%1' as a new map or mod. This copies all files and rewrites matching names and script references.")
+			.arg(CurrentName),
+		&Dialog);
+	IntroLabel->setWordWrap(true);
+	Layout->addWidget(IntroLabel);
+
+	QFormLayout* FormLayout = new QFormLayout();
+	Layout->addLayout(FormLayout);
+
+	QLineEdit* NameWidget = new QLineEdit(&Dialog);
+	NameWidget->setValidator(new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_]*"), &Dialog));
+	FormLayout->addRow("New name:", NameWidget);
+
+	QWidget* ColorWidget = new QWidget(&Dialog);
+	QHBoxLayout* ColorLayout = new QHBoxLayout(ColorWidget);
+	ColorLayout->setContentsMargins(0, 0, 0, 0);
+	ColorLayout->setSpacing(6);
+	QLineEdit* ColorEdit = new QLineEdit(DefaultDisplayColorForEntryName(CurrentName, IsMap), ColorWidget);
+	ColorEdit->setPlaceholderText("Auto color");
+	QPushButton* ColorBrowseButton = new QPushButton(ColorWidget);
+	ColorBrowseButton->setFixedSize(26, 26);
+	ColorBrowseButton->setToolTip("Pick selection color");
+	QToolButton* ColorHelpButton = new QToolButton(ColorWidget);
+	ColorHelpButton->setText(mLocalization->tr("common.help", "?"));
+	ColorHelpButton->setToolTip("Colors only change how this map or mod appears inside the launcher list.");
+	QPushButton* ClearColorButton = new QPushButton(mLocalization->tr("common.clear", "Clear"), ColorWidget);
+	ColorLayout->addWidget(ColorEdit, 1);
+	ColorLayout->addWidget(ColorBrowseButton);
+	ColorLayout->addWidget(ColorHelpButton);
+	ColorLayout->addWidget(ClearColorButton);
+	FormLayout->addRow("Selection color:", ColorWidget);
+
+	auto RefreshColorButton = [=]()
+	{
+		const QString NormalizedColor = NormalizedStoredColor(ColorEdit->text());
+		const QString SafeColor = NormalizedColor.isEmpty() ? QString("#444444") : NormalizedColor;
+		ColorBrowseButton->setStyleSheet(QString("background:%1; border:1px solid #6a6a6a; border-radius:6px;").arg(SafeColor));
+	};
+	connect(ColorBrowseButton, &QPushButton::clicked, &Dialog, [&, ColorEdit]()
+	{
+		const QColor Picked = QColorDialog::getColor(QColor(ColorEdit->text()), &Dialog, "Select Selection Color");
+		if (Picked.isValid())
+			ColorEdit->setText(Picked.name(QColor::HexRgb));
+	});
+	connect(ColorEdit, &QLineEdit::textChanged, &Dialog, [=](const QString&) { RefreshColorButton(); });
+	connect(ClearColorButton, &QPushButton::clicked, &Dialog, [=]() { ColorEdit->clear(); });
+	connect(ColorHelpButton, &QToolButton::clicked, &Dialog, [&, this]()
+	{
+		QMessageBox::information(&Dialog, "Selection Color", "Use a custom color to make a favorite map or mod stand out in the launcher list. This only changes the launcher UI, not the in-game name.");
+	});
+	RefreshColorButton();
+
+	QDialogButtonBox* Buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &Dialog);
+	connect(Buttons, SIGNAL(accepted()), &Dialog, SLOT(accept()));
+	connect(Buttons, SIGNAL(rejected()), &Dialog, SLOT(reject()));
+	Layout->addWidget(Buttons);
+
+	if (Dialog.exec() != QDialog::Accepted)
+		return;
+
+	const QString NewName = NameWidget->text().trimmed().toLower();
+	if (NewName.isEmpty())
+	{
+		QMessageBox::warning(this, IsMap ? "Duplicate Map" : "Duplicate Mod", "The new name cannot be empty.");
+		return;
+	}
+
+	if (NewName.compare(CurrentName, Qt::CaseInsensitive) == 0)
+	{
+		QMessageBox::information(this, IsMap ? "Duplicate Map" : "Duplicate Mod", "Choose a different name to duplicate this item.");
+		return;
+	}
+
+	if (IsMap && mShippedMapList.contains(NewName, Qt::CaseInsensitive))
+	{
+		QMessageBox::warning(this, "Duplicate Map", "The new map name cannot match a built-in map.");
+		return;
+	}
+
+	if (RenameSelectedItem(Item, NewName, true))
+	{
+		const int ItemType = IsMap ? ML_ITEM_MAP : ML_ITEM_MOD_GROUP;
+		const QString NewFavoriteKey = RecentEntryForItem(ItemType, NewName, NewName);
+		const QString CustomColor = NormalizedStoredColor(ColorEdit->text());
+		if (!CustomColor.isEmpty())
+			SetDisplayColorForEntry(NewFavoriteKey, CustomColor);
+	}
 }
 
 void mlMainWindow::OnRenameItem()
@@ -11572,7 +11907,7 @@ void mlMainWindow::OnRenameItem()
 	FormLayout->addRow("New name:", NameWidget);
 	Layout->addLayout(FormLayout);
 
-	QCheckBox* DuplicateWidget = new QCheckBox("Duplicate instead of fully rename (keep old)", &Dialog);
+	QCheckBox* DuplicateWidget = new QCheckBox(mLocalization->tr("dialog.duplicate", "Duplicate instead of fully rename (keep old)"), &Dialog);
 	DuplicateWidget->setChecked(true);
 	Layout->addWidget(DuplicateWidget);
 
@@ -11886,7 +12221,7 @@ void mlMainWindow::OnAnalyzeItem()
 	QProgressDialog ProgressDialog(this);
 	ProgressDialog.setWindowTitle(QString("Analyze %1").arg(IsMap ? "Map" : "Mod"));
 	ProgressDialog.setLabelText(QString("Preparing analysis for %1 '%2'...").arg(IsMap ? "map" : "mod", TitleName));
-	ProgressDialog.setCancelButtonText("Cancel");
+	ProgressDialog.setCancelButtonText(LocalizationManager::Instance().tr("common.cancel", "Cancel"));
 	ProgressDialog.setRange(0, 8);
 	ProgressDialog.setMinimumDuration(0);
 	ProgressDialog.setWindowModality(Qt::WindowModal);
@@ -13103,3 +13438,11 @@ void Export2BinGroupBox::dragLeaveEvent(QDragLeaveEvent* event)
 {
 	event->accept();
 }
+
+
+
+
+
+
+
+

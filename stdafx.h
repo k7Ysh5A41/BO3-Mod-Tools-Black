@@ -20,6 +20,7 @@
 
 #include <QtWidgets/QtWidgets>
 #include <QtNetwork/QtNetwork>
+#include <QtQml/QtQml>
 #include "steam_api.h"
 #include "dvar.h"
 

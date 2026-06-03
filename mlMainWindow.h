@@ -83,6 +83,10 @@ protected:
 };
 
 class QuickLaunchPicker;
+class QTimer;
+class LocalizationManager;
+
+
 
 class mlMainWindow : public QMainWindow
 {
@@ -113,6 +117,7 @@ protected slots:
 	void OnEditBuild();
 	void OnEditBuildAllLanguages();
 	void OnEditReadyForPublish();
+
 	void OnAnalyzeItem();
 	void OnEditPublish();
 	void OnEditOptions();
@@ -134,6 +139,7 @@ protected slots:
 	void OnCleanXPaks();
 	void OnDelete();
 	void OnRenameItem();
+	void OnDuplicateItem();
 	void OnToggleFavorite();
 	void OnExport2BinChooseDirectory();
 	void OnExport2BinToggleOverwriteFiles();
@@ -152,7 +158,8 @@ protected:
 	enum BuildLanguageMode
 	{
 		BuildAllLanguages,
-		BuildEnglishOnly
+		BuildEnglishOnly,
+		BuildSelectedLanguage
 	};
 
 	enum GameRunningState
@@ -282,6 +289,9 @@ protected:
 	bool IsCustomTab(int TabIndex) const;
 	void RefreshRunDvars();
 	bool IsNewerLauncherVersion(const QString& AvailableVersion) const;
+	int CompareSemanticVersion(const QString& Left, const QString& Right) const;
+	void BuildBackupToolDock();
+
 	QString UpdateApiUrl() const;
 	QString UpdateReleasesPageUrl() const;
 	QJsonObject SelectPrimaryReleaseAsset(const QJsonArray& Assets) const;
@@ -329,6 +339,7 @@ protected:
 	QSplitter* mCentralWidgetSplitter;
 	QDockWidget* mAssetDockWidget;
 	QDockWidget* mOutputDockWidget;
+	QDockWidget* mBackupDockWidget;
 	QToolBar* mMainToolBar;
 	QWidget* mTopWidget;
 	QWidget* mLeftPanel;
@@ -403,13 +414,18 @@ protected:
 	QString mPendingGameStatsItemKey;
 	QString mActiveGameStatsItemKey;
 
+public:
+	int ThemeMode() const { return mThemeMode; }
+private:
 	int mThemeMode;
 	QString mThemeProfileId;
 	bool mCachedGameRunning;
 	quint32 mGameProcessId;
 	GameRunningState mGameRunningState;
 	QString mBuildLanguage;
+	QString mLauncherLanguage;
 	QString mLauncherLayout;
+	LocalizationManager* mLocalization;
 	QHash<QString, Qt::CheckState> mCheckedStateByKey;
 	QString mAssetTreeBackgroundCachePath;
 	QString mLogBackgroundCachePath;
@@ -443,6 +459,8 @@ protected:
 	QString mPendingOnlineLaunchLabel;
 
 	QStringList mRunDvars;
+
+
 };
 
 class Export2BinGroupBox : public QGroupBox
