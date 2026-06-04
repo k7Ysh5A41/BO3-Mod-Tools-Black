@@ -45,7 +45,7 @@ dvar_s gDvars[] = {
 					{"splitscreen", "Enable splitscreen", DVAR_VALUE_BOOL},
 					{"splitscreen_playerCount", "Allocate the number of instances for splitscreen", DVAR_VALUE_INT, 0, 2}
 				 };
-static const char* kLauncherVersion = "1.0.5";
+static const char* kLauncherVersion = "1.0.6";
 // Point these at the repo that publishes the launcher ZIP asset users should install.
 static const char* kLauncherReleaseApiUrl = "https://api.github.com/repos/Sphynxmods/BO3-Mod-Tools-Black/releases/latest";
 static const char* kLauncherReleasesUrl = "https://github.com/Sphynxmods/BO3-Mod-Tools-Black/releases";
@@ -456,6 +456,10 @@ static QString NormalizeCategoryTabKey(const QString& RawKey)
 		return "recent";
 	if (Key == "favorite" || Key == "favorites")
 		return "favorites";
+	if (Key == "unpublished")
+		return "unpublished";
+	if (Key == "published")
+		return "published";
 	if (Key == "zm" || Key == "zm maps" || Key == "zm_maps" || Key == "zmmaps" || Key == "zm-maps")
 		return "zm-maps";
 	if (Key == "mp" || Key == "mp maps" || Key == "mp_maps" || Key == "mpmaps" || Key == "mp-maps")
@@ -1477,14 +1481,17 @@ protected:
 			Painter.drawControl(QStyle::CE_TabBarTabShape, Option);
 			Painter.drawControl(QStyle::CE_TabBarTabLabel, Option);
 
-			// Force the final visible label color to match setTabTextColor even when global stylesheets set a tab text color.
-			QRect TextRect = style()->subElementRect(QStyle::SE_TabBarTabText, &Option, this);
-			QString DrawText = fontMetrics().elidedText(Option.text, elideMode(), qMax(0, TextRect.width()));
-			Painter.save();
-			Painter.setFont(font());
-			Painter.setPen(TabColor.isValid() ? TabColor : palette().color(QPalette::ButtonText));
-			Painter.drawText(TextRect, Qt::AlignCenter | Qt::TextShowMnemonic, DrawText);
-			Painter.restore();
+			if (TabColor.isValid())
+			{
+				// Force the final visible label color to match setTabTextColor even when global stylesheets set a tab text color.
+				QRect TextRect = style()->subElementRect(QStyle::SE_TabBarTabText, &Option, this);
+				QString DrawText = fontMetrics().elidedText(Option.text, elideMode(), qMax(0, TextRect.width()));
+				Painter.save();
+				Painter.setFont(font());
+				Painter.setPen(TabColor);
+				Painter.drawText(TextRect, Qt::AlignCenter | Qt::TextShowMnemonic, DrawText);
+				Painter.restore();
+			}
 		}
 	}
 };
@@ -3184,6 +3191,7 @@ mlMainWindow::mlMainWindow()
 	mAddCategoryTabButton = NULL;
 	mCategoryTabHoveredIndex = -1;
 	mCategorySummaryLabel = NULL;
+	mSearchFilterWidget = NULL;
 	mOutputTabs = NULL;
 	mCentralWidgetSplitter = NULL;
 	mAssetDockWidget = NULL;
@@ -3209,6 +3217,7 @@ mlMainWindow::mlMainWindow()
 	mQuickLaunchLabel = NULL;
 	mStartupQuoteLabel = NULL;
 	mStartupQuoteText.clear();
+	mSearchFilterText.clear();
 	mStartupQuotePopupShown = false;
 	mRunOnlineWidget = NULL;
 	mCurrentOutputBlockItem = NULL;
@@ -3355,6 +3364,8 @@ mlMainWindow::mlMainWindow()
 	AddCategoryTab(mLocalization->tr("category.all", "All"), "all");
 	AddCategoryTab(mLocalization->tr("category.recent", "Recent"), "recent");
 	AddCategoryTab(mLocalization->tr("category.favorites", "Favorites"), "favorites");
+	AddCategoryTab("Unpublished", "unpublished");
+	AddCategoryTab("Published", "published");
 	AddCategoryTab(mLocalization->tr("category.zm_maps", "ZM Maps"), "zm-maps");
 	AddCategoryTab(mLocalization->tr("category.mp_maps", "MP Maps"), "mp-maps");
 	AddCategoryTab(mLocalization->tr("category.mods", "Mods"), "mods");
@@ -3406,6 +3417,13 @@ mlMainWindow::mlMainWindow()
 	mCategorySummaryLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	mCategorySummaryLabel->setStyleSheet("color: #8a8a8a;");
 	CategoryHeaderLayout->addWidget(mCategorySummaryLabel, 0);
+
+	mSearchFilterWidget = new QLineEdit(CategoryHeader);
+	mSearchFilterWidget->setObjectName("SearchFilterWidget");
+	mSearchFilterWidget->setPlaceholderText(mLocalization->tr("category.search_placeholder", "Search Map/Mod"));
+	mSearchFilterWidget->setClearButtonEnabled(true);
+	mSearchFilterWidget->setMaximumWidth(200);
+	CategoryHeaderLayout->insertWidget(CategoryHeaderLayout->count() - 1, mSearchFilterWidget, 0);
 	LeftLayout->addWidget(CategoryHeader);
 
 	mFileListWidget = new QTreeWidget();
@@ -3453,6 +3471,12 @@ mlMainWindow::mlMainWindow()
 		PopulateFileList();
 	});
 
+	connect(mSearchFilterWidget, &QLineEdit::textChanged, this, [=](const QString& Text)
+	{
+		mSearchFilterText = Text.trimmed();
+		PopulateFileList();
+	});
+
 	connect(mCategoryTabs, &QTabBar::tabBarDoubleClicked, this, [=](int Index)
 	{
 		if (Index >= 0 && Index < mCategoryTabs->count() && !IsAddCategoryTabKey(mCategoryTabs->tabData(Index).toString()))
@@ -3472,6 +3496,13 @@ mlMainWindow::mlMainWindow()
 		QMenu Menu(mCategoryTabs);
 		QAction* EditAction = Menu.addAction(mLocalization->tr("common.edit", mLocalization->tr("common.edit", "Edit")));
 		const bool CustomTab = TabKey.startsWith("custom-");
+		const bool CanHideTab = (TabKey == "unpublished" || TabKey == "published");
+
+		QAction* HideAction = NULL;
+		if (CanHideTab)
+		{
+			HideAction = Menu.addAction("Hide");
+		}
 
 		QWidgetAction* DeleteAction = new QWidgetAction(&Menu);
 		QToolButton* DeleteButton = new QToolButton(&Menu);
@@ -3501,6 +3532,13 @@ mlMainWindow::mlMainWindow()
 		if (PickedAction == EditAction)
 		{
 			ShowCategoryTabEditDialog(TabIndex);
+			return;
+		}
+
+		if (PickedAction == HideAction && CanHideTab)
+		{
+			QSettings().setValue(TabKey == "unpublished" ? "ShowUnpublishedTab" : "ShowPublishedTab", false);
+			RebuildCategoryTabs();
 			return;
 		}
 
@@ -3540,15 +3578,23 @@ mlMainWindow::mlMainWindow()
 	});
 	connect(mFileListWidget, &QTreeWidget::itemExpanded, this, [=](QTreeWidgetItem* Item)
 	{
-		if (!Item || Item->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN)
+		if (!Item)
 			return;
-		QSettings().setValue(SectionSettingKey(Item->text(0)) + "/Expanded", true);
+		const int ItemType = Item->data(0, Qt::UserRole).toInt();
+		if (ItemType == ML_ITEM_UNKNOWN)
+			QSettings().setValue(SectionSettingKey(Item->text(0)) + "/Expanded", true);
+		else if (ItemType == ML_ITEM_MOD_GROUP)
+			QSettings().setValue(QString("ModGroupExpanded/%1").arg(Item->data(0, ML_ITEM_CONTAINER_ROLE).toString().toLower()), true);
 	});
 	connect(mFileListWidget, &QTreeWidget::itemCollapsed, this, [=](QTreeWidgetItem* Item)
 	{
-		if (!Item || Item->data(0, Qt::UserRole).toInt() != ML_ITEM_UNKNOWN)
+		if (!Item)
 			return;
-		QSettings().setValue(SectionSettingKey(Item->text(0)) + "/Expanded", false);
+		const int ItemType = Item->data(0, Qt::UserRole).toInt();
+		if (ItemType == ML_ITEM_UNKNOWN)
+			QSettings().setValue(SectionSettingKey(Item->text(0)) + "/Expanded", false);
+		else if (ItemType == ML_ITEM_MOD_GROUP)
+			QSettings().setValue(QString("ModGroupExpanded/%1").arg(Item->data(0, ML_ITEM_CONTAINER_ROLE).toString().toLower()), false);
 	});
 	connect(mFileListWidget, &QTreeWidget::currentItemChanged, this, [=](QTreeWidgetItem* CurrentItem, QTreeWidgetItem* PreviousItem)
 		{
@@ -3562,9 +3608,7 @@ mlMainWindow::mlMainWindow()
 
 	mActionsPanel = new QWidget(mTopWidget);
 	mActionsPanel->setObjectName("ActionsPanel");
-	mActionsPanel->setMinimumWidth(220);
-	mActionsPanel->setMaximumWidth(220);
-	mActionsPanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+	mActionsPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 
 	QVBoxLayout* ActionsLayout = new QVBoxLayout(mActionsPanel);
 	ActionsLayout->setContentsMargins(10, 8, 10, 8);
@@ -4417,10 +4461,7 @@ void mlMainWindow::CreateMenu()
 		ThemeGroup->addAction(mActionThemeDarkModern);
 	MenuBar->addAction(ThemesMenu->menuAction());
 
-	QMenu* OptionsMenu = new QMenu(mLocalization->tr("menu.options", "&Options"), MenuBar);
-	OptionsMenu->addSeparator();
-	OptionsMenu->addAction(mActionEditOptions);
-	MenuBar->addAction(OptionsMenu->menuAction());
+	MenuBar->addAction(mActionEditOptions);
 
 	QMenu* HelpMenu = new QMenu(mLocalization->tr("menu.help", "&Help"), MenuBar);
 	HelpMenu->addAction(mActionHelpGuide);
@@ -4482,6 +4523,32 @@ void mlMainWindow::CreateToolBar()
 		ExtraToolsMenu->addSeparator();
 
 		ExtraToolsMenu->addAction(mActionFileOpenScriptReference);
+		{
+			QSettings ETSet;
+			int ETCnt = ETSet.beginReadArray("ExtraTools");
+			if (ETCnt > 0)
+			{
+				ExtraToolsMenu->addSeparator();
+				for (int i = 0; i < ETCnt; i++)
+				{
+					ETSet.setArrayIndex(i);
+					QString ETName = ETSet.value("Name").toString();
+					QString ETPath = ETSet.value("Path").toString();
+					QString ETIcon = ETSet.value("Icon").toString();
+					if (ETName.isEmpty())
+						continue;
+					QAction* ETAction = ExtraToolsMenu->addAction(ETName);
+					if (!ETIcon.isEmpty() && QFileInfo(ETIcon).exists())
+						ETAction->setIcon(QIcon(ETIcon));
+					connect(ETAction, &QAction::triggered, this, [ETPath]()
+					{
+						if (!ETPath.isEmpty())
+							QProcess::startDetached(ETPath, QStringList());
+					});
+				}
+			}
+			ETSet.endArray();
+		}
 		ExtraToolsButton->setMenu(ExtraToolsMenu);
 		ToolBar->addWidget(ExtraToolsButton);
 		HasAnyVisibleItems = true;
@@ -4626,6 +4693,22 @@ void mlMainWindow::closeEvent(QCloseEvent* Event)
 	Settings.setValue("Geometry", saveGeometry());
 	Settings.setValue("State", saveState());
 	Settings.endGroup();
+
+	if (mFileListWidget)
+	{
+		std::function<void(QTreeWidgetItem*)> SaveTree = [&](QTreeWidgetItem* Parent)
+		{
+			for (int i = 0; i < Parent->childCount(); i++)
+			{
+				QTreeWidgetItem* Child = Parent->child(i);
+				if (Child->data(0, Qt::UserRole).toInt() == ML_ITEM_MOD_GROUP)
+					Settings.setValue(QString("ModGroupExpanded/%1").arg(Child->data(0, ML_ITEM_CONTAINER_ROLE).toString().toLower()), Child->isExpanded());
+				SaveTree(Child);
+			}
+		};
+		SaveTree(mFileListWidget->invisibleRootItem());
+	}
+	Settings.sync();
 
 	Event->accept();
 }
@@ -5908,9 +5991,45 @@ void mlMainWindow::ApplyLauncherLayout()
 		delete Item;
 	}
 
-	mTopLayout->addStretch(1);
-	mTopLayout->addWidget(mActionsPanel);
-	mTopLayout->addStretch(1);
+	if (!mCentralWidgetSplitter)
+	{
+		mCentralWidgetSplitter = new QSplitter(Qt::Horizontal, mTopWidget);
+		mCentralWidgetSplitter->setObjectName("CentralSplitter");
+		mCentralWidgetSplitter->setHandleWidth(4);
+	}
+	while (mCentralWidgetSplitter->count() > 0)
+	{
+		QWidget* W = mCentralWidgetSplitter->widget(0);
+		mCentralWidgetSplitter->widget(0)->setParent(NULL);
+		if (W != mActionsPanel)
+			delete W;
+	}
+	QWidget* SpacerWidget = new QWidget();
+	SpacerWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	mCentralWidgetSplitter->addWidget(SpacerWidget);
+	mActionsPanel->setMinimumWidth(300);
+	mActionsPanel->setMaximumWidth(600);
+	mActionsPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+	mCentralWidgetSplitter->addWidget(mActionsPanel);
+	mCentralWidgetSplitter->setCollapsible(1, false);
+	{
+		QVariantList Saved = QSettings().value("CentralSplitterSizes").toList();
+		if (Saved.size() == 2)
+		{
+			QList<int> Sizes;
+			Sizes << Saved[0].toInt() << Saved[1].toInt();
+			mCentralWidgetSplitter->setSizes(Sizes);
+		}
+	}
+	connect(mCentralWidgetSplitter, &QSplitter::splitterMoved, this, [=]()
+	{
+		QList<int> Sizes = mCentralWidgetSplitter->sizes();
+		QVariantList SaveList;
+		for (int S : Sizes)
+			SaveList << S;
+		QSettings().setValue("CentralSplitterSizes", SaveList);
+	}, Qt::UniqueConnection);
+	mTopLayout->addWidget(mCentralWidgetSplitter);
 	mTopWidget->show();
 	mActionsPanel->show();
 	mAssetDockWidget->setFloating(false);
@@ -6039,6 +6158,10 @@ void mlMainWindow::RebuildCategoryTabs()
 	AddTab(mLocalization->tr("category.all", "All"), "all");
 	AddTab(mLocalization->tr("category.recent", "Recent"), "recent");
 	AddTab(mLocalization->tr("category.favorites", "Favorites"), "favorites");
+	if (Settings.value("ShowUnpublishedTab", false).toBool())
+		AddTab("Unpublished", "unpublished");
+	if (Settings.value("ShowPublishedTab", false).toBool())
+		AddTab("Published", "published");
 	AddTab(mLocalization->tr("category.zm_maps", "ZM Maps"), "zm-maps");
 	AddTab(mLocalization->tr("category.mp_maps", "MP Maps"), "mp-maps");
 	AddTab(mLocalization->tr("category.mods", "Mods"), "mods");
@@ -7657,7 +7780,7 @@ void mlMainWindow::PopulatePinnedRoot(QTreeWidgetItem* RootItem, const QStringLi
 				AddedEntries.insert(ChildKey.toLower());
 			}
 
-			GroupItem->setExpanded(true);
+			GroupItem->setExpanded(QSettings().value(QString("ModGroupExpanded/%1").arg(ItemData.value("container").toString().toLower()), true).toBool());
 			continue;
 		}
 
@@ -7771,6 +7894,8 @@ void mlMainWindow::UpdateBackgroundOverlays()
 void mlMainWindow::PopulateFileList()
 {
 	AppendStartupTrace("PopulateFileList:start");
+	if (mFileListWidget)
+		mFileListWidget->blockSignals(true);
 	mFileListWidget->clear();
 	QSettings Settings;
 	const QStringList Favorites = FavoriteEntries();
@@ -7827,6 +7952,28 @@ void mlMainWindow::PopulateFileList()
 		mFileListWidget->setItemWidget(Item, 0, HeaderWidget);
 	};
 
+	auto IsPublishedItem = [&](const QString& ItemName, bool IsMap) -> bool
+	{
+		const QString WorkshopJsonPath = IsMap
+			? QDir::cleanPath(QString("%1/usermaps/%2/zone/workshop.json").arg(mGamePath, ItemName))
+			: QDir::cleanPath(QString("%1/mods/%2/zone/workshop.json").arg(mGamePath, ItemName));
+		QFile WorkshopFile(WorkshopJsonPath);
+		if (!WorkshopFile.open(QIODevice::ReadOnly))
+			return false;
+		const QJsonObject Root = QJsonDocument::fromJson(WorkshopFile.readAll()).object();
+		const QString PublisherId = Root.value("PublisherID").toString().trimmed();
+		return !PublisherId.isEmpty() && PublisherId != "0";
+	};
+
+	auto MatchesSearch = [&](const QString& DisplayText, const QString& MapCode) -> bool
+	{
+		if (mSearchFilterText.isEmpty())
+			return true;
+		const QString LowerFilter = mSearchFilterText.toLower();
+		return DisplayText.toLower().contains(LowerFilter)
+			|| MapCode.toLower().contains(LowerFilter);
+	};
+
 	QString UserMapsFolder = QDir::cleanPath(QString("%1/usermaps/").arg(mGamePath));
 	QStringList UserMaps = QDir(UserMapsFolder).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
 	if (ActiveTab == "all")
@@ -7843,9 +7990,19 @@ void mlMainWindow::PopulateFileList()
 	{
 		QString ZoneFileName = QString("%1/%2/zone_source/%3.zone").arg(UserMapsFolder, MapName, MapName);
 		QString FavoriteKey = QString("map:%1").arg(MapName.toLower());
+		QString DisplayName = DisplayNameForEntry(FavoriteKey);
+		if (DisplayName.isEmpty())
+			DisplayName = DefaultDisplayNameForEntryName(MapName);
 
 		if (QFileInfo(ZoneFileName).isFile())
 		{
+			if (ActiveTab == "unpublished" && IsPublishedItem(MapName, true))
+				continue;
+			if (ActiveTab == "published" && !IsPublishedItem(MapName, true))
+				continue;
+			if (!MatchesSearch(DisplayName, MapName))
+				continue;
+
 			Lookup.insert(FavoriteKey, QVariantMap{ { "type", ML_ITEM_MAP }, { "container", MapName }, { "entry", MapName }, { "display", MapName } });
 			if (ActiveTab == "all")
 			{
@@ -7856,6 +8013,11 @@ void mlMainWindow::PopulateFileList()
 			{
 				if (!MapMatchesCurrentTab(MapName))
 					continue;
+				QTreeWidgetItem* MapItem = new QTreeWidgetItem(mFileListWidget, QStringList() << MapName);
+				ConfigureItem(MapItem, ML_ITEM_MAP, MapName, MapName, FavoriteKey, MapName, StandardRowHeight);
+			}
+			else if (ActiveTab == "unpublished" || ActiveTab == "published")
+			{
 				QTreeWidgetItem* MapItem = new QTreeWidgetItem(mFileListWidget, QStringList() << MapName);
 				ConfigureItem(MapItem, ML_ITEM_MAP, MapName, MapName, FavoriteKey, MapName, StandardRowHeight);
 			}
@@ -7876,6 +8038,16 @@ void mlMainWindow::PopulateFileList()
 
 	for (QString ModName : Mods)
 	{
+		QString ModDisplayName = DisplayNameForEntry(QString("mod:%1").arg(ModName.toLower()));
+		if (ModDisplayName.isEmpty())
+			ModDisplayName = DefaultDisplayNameForEntryName(ModName);
+		if (!MatchesSearch(ModDisplayName, ModName))
+			continue;
+
+		if ((ActiveTab == "unpublished" && !IsPublishedItem(ModName, false)) ||
+			(ActiveTab == "published" && IsPublishedItem(ModName, false)))
+			continue;
+
 		QTreeWidgetItem* ParentItem = NULL;
 		const QString GroupFavoriteKey = QString("mod:%1").arg(ModName.toLower());
 		Lookup.insert(GroupFavoriteKey, QVariantMap{ { "type", ML_ITEM_MOD_GROUP }, { "container", ModName }, { "entry", ModName }, { "display", ModName } });
@@ -7889,7 +8061,7 @@ void mlMainWindow::PopulateFileList()
 				QString FavoriteKey = QString("mod:%1/%2").arg(ModName.toLower(), QString(Files[FileIdx]).toLower());
 				Lookup.insert(FavoriteKey, QVariantMap{ { "type", ML_ITEM_MOD }, { "container", ModName }, { "entry", QString(Files[FileIdx]) }, { "display", QString(Files[FileIdx]) } });
 
-				if (ActiveTab != "mods" && ActiveTab != "all" && !ActiveTab.startsWith("custom-"))
+				if (ActiveTab != "mods" && ActiveTab != "all" && ActiveTab != "unpublished" && ActiveTab != "published" && !ActiveTab.startsWith("custom-"))
 					continue;
 
 				if (ActiveTab.startsWith("custom-"))
@@ -7905,9 +8077,9 @@ void mlMainWindow::PopulateFileList()
 						ParentItem = new QTreeWidgetItem(ModsRootItem, QStringList() << ModName);
 					else
 						ParentItem = new QTreeWidgetItem(mFileListWidget, QStringList() << ModName);
-					ConfigureItem(ParentItem, ML_ITEM_MOD_GROUP, ModName, ModName, GroupFavoriteKey, ModName, StandardRowHeight);
-					ParentItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-					ParentItem->setExpanded(true);
+				ConfigureItem(ParentItem, ML_ITEM_MOD_GROUP, ModName, ModName, GroupFavoriteKey, ModName, StandardRowHeight);
+				ParentItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+				ParentItem->setExpanded(Settings.value(QString("ModGroupExpanded/%1").arg(ModName.toLower()), true).toBool());
 				}
 
 				QTreeWidgetItem* ModItem = new QTreeWidgetItem(ParentItem, QStringList() << Files[FileIdx]);
@@ -7920,6 +8092,20 @@ void mlMainWindow::PopulateFileList()
 		PopulatePinnedRoot(mFileListWidget->invisibleRootItem(), Recents, Lookup);
 	else if (ActiveTab == "favorites")
 		PopulatePinnedRoot(mFileListWidget->invisibleRootItem(), Favorites, Lookup);
+	else if (ActiveTab == "unpublished" || ActiveTab == "published")
+	{
+		auto RemoveEmptyRoots = [&](QTreeWidgetItem*& RootItem)
+		{
+			if (!RootItem || RootItem->childCount() > 0)
+				return;
+			const int RootIndex = mFileListWidget->indexOfTopLevelItem(RootItem);
+			if (RootIndex >= 0)
+				delete mFileListWidget->takeTopLevelItem(RootIndex);
+			RootItem = NULL;
+		};
+		RemoveEmptyRoots(MapsRootItem);
+		RemoveEmptyRoots(ModsRootItem);
+	}
 	else if (ActiveTab == "all")
 	{
 		auto RemoveRootIfEmpty = [&](QTreeWidgetItem*& RootItem)
@@ -7950,6 +8136,8 @@ void mlMainWindow::PopulateFileList()
 	UpdateCategorySummary(Lookup, Recents, Favorites);
 	UpdateQuickLaunchVisibility();
 	UpdateBuildActionButtons();
+	if (mFileListWidget)
+		mFileListWidget->blockSignals(false);
 	AppendStartupTrace(QString("PopulateFileList:done items=%1").arg(mFileListWidget ? mFileListWidget->topLevelItemCount() : -1));
 }
 
@@ -8292,28 +8480,28 @@ void mlMainWindow::OnFileNew()
 
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
 	Dialog.setWindowTitle(mLocalization->tr("dialog.new_map_mod", "New Map or Mod"));
-	Dialog.resize(560, 300);
-	Dialog.setMinimumSize(500, 260);
+	Dialog.resize(620, 420);
+	Dialog.setMinimumSize(560, 400);
 
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
-	Layout->setContentsMargins(14, 8, 14, 10);
-	Layout->setSpacing(8);
+	Layout->setContentsMargins(16, 12, 16, 12);
+	Layout->setSpacing(6);
 	QLabel* IntroLabel = new QLabel(mLocalization->tr("dialog.new_map_mod_intro", "Create a new map or mod."), &Dialog);
-	IntroLabel->setWordWrap(true);
 	QFont IntroFont = IntroLabel->font();
-	IntroFont.setPointSize(IntroFont.pointSize() + 2);
+	IntroFont.setPointSize(IntroFont.pointSize() + 3);
 	IntroFont.setBold(true);
 	IntroLabel->setFont(IntroFont);
 	Layout->addWidget(IntroLabel);
 
 	QLabel* NamingLabel = new QLabel(mLocalization->tr("dialog.new_map_mod_naming", "Naming scheme: multiplayer maps use mp_*, zombie maps use zm_*, and mods use your mod folder name."), &Dialog);
 	NamingLabel->setWordWrap(true);
+	NamingLabel->setStyleSheet("color: #999;");
 	Layout->addWidget(NamingLabel);
 
 	QFormLayout* FormLayout = new QFormLayout();
-	FormLayout->setContentsMargins(0, 0, 0, 0);
-	FormLayout->setHorizontalSpacing(10);
-	FormLayout->setVerticalSpacing(8);
+	FormLayout->setContentsMargins(0, 4, 0, 0);
+	FormLayout->setHorizontalSpacing(12);
+	FormLayout->setVerticalSpacing(6);
 	Layout->addLayout(FormLayout);
 
 	QLineEdit* NameWidget = new QLineEdit();
@@ -8345,6 +8533,22 @@ void mlMainWindow::OnFileNew()
 	ColorRowLayout->addWidget(ClearColorButton);
 	FormLayout->addRow("Selection color:", ColorRowWidget);
 
+	QCheckBox* AddToFavoritesCheck = new QCheckBox("Add to Favorites");
+	FormLayout->addRow("", AddToFavoritesCheck);
+
+	QListWidget* CategoryMultiList = new QListWidget();
+	CategoryMultiList->setSelectionMode(QAbstractItemView::MultiSelection);
+	CategoryMultiList->setMaximumHeight(100);
+	const QList<QVariantMap> CustomTabDefs = LoadCustomTabDefs();
+	for (const QVariantMap& Tab : CustomTabDefs)
+	{
+		QListWidgetItem* CatItem = new QListWidgetItem(Tab.value("name").toString(), CategoryMultiList);
+		CatItem->setData(Qt::UserRole, Tab.value("id").toString());
+		CatItem->setFlags(CatItem->flags() | Qt::ItemIsUserCheckable);
+		CatItem->setCheckState(Qt::Unchecked);
+	}
+	FormLayout->addRow("Add to custom tabs:", CategoryMultiList);
+
 	QComboBox* TemplateWidget = new QComboBox();
 	for (const QString& TemplateName : Templates)
 	{
@@ -8360,19 +8564,43 @@ void mlMainWindow::OnFileNew()
 	const int DefaultTemplateIndex = TemplateWidget->findData("ZM Mod Level");
 	TemplateWidget->setCurrentIndex(DefaultTemplateIndex >= 0 ? DefaultTemplateIndex : 0);
 	FormLayout->addRow("Template:", TemplateWidget);
-	auto RefreshAutoFields = [=]()
-	{
-		const QString Name = NameWidget->text().trimmed();
-		const QString RawTemplateName = TemplateWidget->currentData().toString();
-		const bool IsMapTemplate = RawTemplateName.compare("ZM Mod Level", Qt::CaseInsensitive) == 0
-			|| RawTemplateName.compare("MP Mod Level", Qt::CaseInsensitive) == 0;
-		if (ColorEdit->text().trimmed().isEmpty())
-			ColorEdit->setPlaceholderText(Name.isEmpty() ? "Auto color" : DefaultDisplayColorForEntryName(Name, IsMapTemplate));
-		ColorBrowseButton->setStyleSheet(QString("background:%1; border:1px solid #6a6a6a; border-radius:6px;").arg(
-			NormalizedStoredColor(ColorEdit->text()).isEmpty()
-				? (Name.isEmpty() ? QString("#444444") : DefaultDisplayColorForEntryName(Name, IsMapTemplate))
-				: NormalizedStoredColor(ColorEdit->text())));
-	};
+
+	QWidget* ZoneWidget = new QWidget(&Dialog);
+	QVBoxLayout* ZoneLayout = new QVBoxLayout(ZoneWidget);
+	ZoneLayout->setContentsMargins(0, 0, 0, 0);
+	ZoneLayout->setSpacing(4);
+	QLabel* ZoneLabel = new QLabel("Zone files to create:", ZoneWidget);
+	ZoneLabel->setStyleSheet("font-weight: bold;");
+	ZoneLayout->addWidget(ZoneLabel);
+	QCheckBox* ZoneCoreCheck = new QCheckBox("core_mod.zone", ZoneWidget);
+	QCheckBox* ZoneMpCheck = new QCheckBox("mp_mod.zone", ZoneWidget);
+	QCheckBox* ZoneCpCheck = new QCheckBox("cp_mod.zone", ZoneWidget);
+	QCheckBox* ZoneZmCheck = new QCheckBox("zm_mod.zone", ZoneWidget);
+	ZoneCoreCheck->setChecked(true);
+	ZoneMpCheck->setChecked(true);
+	ZoneCpCheck->setChecked(true);
+	ZoneZmCheck->setChecked(true);
+	ZoneLayout->addWidget(ZoneCoreCheck);
+	ZoneLayout->addWidget(ZoneMpCheck);
+	ZoneLayout->addWidget(ZoneCpCheck);
+	ZoneLayout->addWidget(ZoneZmCheck);
+	ZoneWidget->setEnabled(false);
+	FormLayout->addRow("", ZoneWidget);
+
+		auto RefreshAutoFields = [=]()
+		{
+			const QString Name = NameWidget->text().trimmed();
+			const QString RawTemplateName = TemplateWidget->currentData().toString();
+			const bool IsMapTemplate = RawTemplateName.compare("ZM Mod Level", Qt::CaseInsensitive) == 0
+				|| RawTemplateName.compare("MP Mod Level", Qt::CaseInsensitive) == 0;
+			if (ColorEdit->text().trimmed().isEmpty())
+				ColorEdit->setPlaceholderText(Name.isEmpty() ? "Auto color" : DefaultDisplayColorForEntryName(Name, IsMapTemplate));
+			ColorBrowseButton->setStyleSheet(QString("background:%1; border:1px solid #6a6a6a; border-radius:6px;").arg(
+				NormalizedStoredColor(ColorEdit->text()).isEmpty()
+					? (Name.isEmpty() ? QString("#444444") : DefaultDisplayColorForEntryName(Name, IsMapTemplate))
+					: NormalizedStoredColor(ColorEdit->text())));
+			ZoneWidget->setEnabled(!IsMapTemplate);
+		};
 	connect(NameWidget, &QLineEdit::textChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
 	connect(TemplateWidget, &QComboBox::currentTextChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
 	connect(ColorEdit, &QLineEdit::textChanged, &Dialog, [=](const QString&) { RefreshAutoFields(); });
@@ -8390,10 +8618,14 @@ void mlMainWindow::OnFileNew()
 	RefreshAutoFields();
 
 	QHBoxLayout* ButtonRow = new QHBoxLayout();
-	QPushButton* CancelButton = new QPushButton(LocalizationManager::Instance().tr("common.cancel", "Cancel"), &Dialog);
-	ButtonRow->addWidget(CancelButton);
+	ButtonRow->setContentsMargins(0, 4, 0, 0);
 	ButtonRow->addStretch();
+	QPushButton* CancelButton = new QPushButton(LocalizationManager::Instance().tr("common.cancel", "Cancel"), &Dialog);
+	CancelButton->setFixedHeight(30);
+	ButtonRow->addWidget(CancelButton);
+	ButtonRow->addSpacing(8);
 	QPushButton* CreateButton = new QPushButton(mLocalization->tr("dialog.create", "Create"), &Dialog);
+	CreateButton->setFixedHeight(30);
 	ButtonRow->addWidget(CreateButton);
 	Layout->addLayout(ButtonRow);
 	int RequestedCreationMode = -1;
@@ -8494,6 +8726,24 @@ void mlMainWindow::OnFileNew()
 
 	if (RecursiveCopy(TemplatesFolder.absolutePath() + QDir::separator() + Templates[TemplateWidget->currentIndex()], QDir::cleanPath(mGamePath)))
 	{
+		if (!CreateMap)
+		{
+			const QString ModZoneDir = QDir::cleanPath(QString("%1/mods/%2/zone_source").arg(mGamePath, Name));
+			auto RemoveZoneIfUnchecked = [&](QCheckBox* Check, const QString& FileName)
+			{
+				if (Check && !Check->isChecked())
+				{
+					const QString ZonePath = QDir::cleanPath(QString("%1/%2").arg(ModZoneDir, FileName));
+					if (QFileInfo(ZonePath).exists())
+						QFile::remove(ZonePath);
+				}
+			};
+			RemoveZoneIfUnchecked(ZoneCoreCheck, "core_mod.zone");
+			RemoveZoneIfUnchecked(ZoneMpCheck, "mp_mod.zone");
+			RemoveZoneIfUnchecked(ZoneCpCheck, "cp_mod.zone");
+			RemoveZoneIfUnchecked(ZoneZmCheck, "zm_mod.zone");
+		}
+
 		const bool CreatedMap = QDir(QDir::cleanPath(QString("%1/usermaps/%2").arg(mGamePath, Name))).exists();
 		const bool CreatedMod = QDir(QDir::cleanPath(QString("%1/mods/%2").arg(mGamePath, Name))).exists();
 		if (CreatedMap || CreatedMod)
@@ -8503,6 +8753,34 @@ void mlMainWindow::OnFileNew()
 				SetDisplayNameForEntry(FavoriteKey, CustomDisplayName.isEmpty() ? DefaultDisplayNameForEntryName(Name) : CustomDisplayName);
 			if (DisplayColorForEntry(FavoriteKey).isEmpty())
 				SetDisplayColorForEntry(FavoriteKey, CustomDisplayColor.isEmpty() ? DefaultDisplayColorForEntryName(Name, CreatedMap) : CustomDisplayColor);
+
+		if (AddToFavoritesCheck->isChecked())
+			ToggleFavoriteEntry(FavoriteKey);
+
+		QStringList SelectedCategoryIds;
+		for (int CatIdx = 0; CatIdx < CategoryMultiList->count(); CatIdx++)
+		{
+			QListWidgetItem* CatItem = CategoryMultiList->item(CatIdx);
+			if (CatItem->checkState() == Qt::Checked)
+				SelectedCategoryIds.append(CatItem->data(Qt::UserRole).toString());
+		}
+		if (!SelectedCategoryIds.isEmpty())
+		{
+			QList<QVariantMap> Defs = LoadCustomTabDefs();
+			for (QVariantMap& Tab : Defs)
+			{
+				if (SelectedCategoryIds.contains(Tab.value("id").toString()))
+				{
+					QStringList Items = Tab.value("items").toStringList();
+					if (!Items.contains(FavoriteKey, Qt::CaseInsensitive))
+					{
+						Items.append(FavoriteKey);
+						Tab["items"] = Items;
+					}
+				}
+			}
+			SaveCustomTabDefs(Defs);
+		}
 		}
 		PopulateFileList();
 
@@ -9261,6 +9539,18 @@ void mlMainWindow::OnEditOptions()
 	ShowStartupQuoteCheckbox->setToolTip("Show a random quote when the launcher opens.");
 	GeneralLayout->addWidget(ShowStartupQuoteCheckbox);
 
+	QFrame* TabFrame = new QFrame();
+	TabFrame->setFrameShape(QFrame::HLine);
+	GeneralLayout->addWidget(TabFrame);
+
+	GeneralLayout->addWidget(new QLabel("Category Tabs"));
+	QCheckBox* ShowUnpublishedTabCheckbox = new QCheckBox("Show Unpublished Tab");
+	ShowUnpublishedTabCheckbox->setChecked(Settings.value("ShowUnpublishedTab", false).toBool());
+	GeneralLayout->addWidget(ShowUnpublishedTabCheckbox);
+	QCheckBox* ShowPublishedTabCheckbox = new QCheckBox("Show Published Tab");
+	ShowPublishedTabCheckbox->setChecked(Settings.value("ShowPublishedTab", false).toBool());
+	GeneralLayout->addWidget(ShowPublishedTabCheckbox);
+
 	QFrame* PinnedFrame = new QFrame();
 	PinnedFrame->setFrameShape(QFrame::HLine);
 	GeneralLayout->addWidget(PinnedFrame);
@@ -9315,33 +9605,41 @@ void mlMainWindow::OnEditOptions()
 	};
 
 	QWidget* ToolbarTab = new QWidget(&Dialog);
-	QHBoxLayout* ToolbarLayout = new QHBoxLayout(ToolbarTab);
+	QVBoxLayout* ToolbarLayout = new QVBoxLayout(ToolbarTab);
 	ToolbarLayout->setContentsMargins(14, 14, 14, 14);
-	ToolbarLayout->setSpacing(12);
-
-	QListWidget* ToolbarList = new QListWidget(ToolbarTab);
-	ToolbarList->setObjectName("ToolbarSettingsList");
-	ToolbarList->setIconSize(QSize(20, 20));
-	ToolbarList->setSelectionMode(QAbstractItemView::SingleSelection);
-	ToolbarList->setMinimumWidth(280);
-	ToolbarLayout->addWidget(ToolbarList, 0);
+	ToolbarLayout->setSpacing(6);
 
 	QVBoxLayout* ToolbarDetailLayout = new QVBoxLayout();
-	ToolbarDetailLayout->setSpacing(10);
-	ToolbarLayout->addLayout(ToolbarDetailLayout, 1);
+	ToolbarDetailLayout->setSpacing(6);
+	ToolbarLayout->addLayout(ToolbarDetailLayout);
 
+	QHBoxLayout* ToolbarNameRow = new QHBoxLayout();
+	ToolbarNameRow->setSpacing(6);
 	QLabel* ToolbarNameLabel = new QLabel(mLocalization->tr("settings.toolbar_item", "Item:"));
+	ToolbarNameLabel->setStyleSheet("font-weight: bold;");
 	QLabel* ToolbarNameValue = new QLabel("-");
 	ToolbarNameValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	ToolbarDetailLayout->addWidget(ToolbarNameLabel);
-	ToolbarDetailLayout->addWidget(ToolbarNameValue);
+	ToolbarNameRow->addWidget(ToolbarNameLabel);
+	ToolbarNameRow->addWidget(ToolbarNameValue, 1);
+	QToolButton* ToolbarHelpBtn = new QToolButton();
+	ToolbarHelpBtn->setText("?");
+	ToolbarHelpBtn->setToolTip("Show description of this built-in action.");
+	ToolbarHelpBtn->setFixedSize(22, 22);
+	ToolbarHelpBtn->setAutoRaise(true);
+	ToolbarHelpBtn->setEnabled(false);
+	ToolbarNameRow->addWidget(ToolbarHelpBtn);
+	ToolbarDetailLayout->addLayout(ToolbarNameRow);
 
+	QHBoxLayout* ToolbarFunctionRow = new QHBoxLayout();
+	ToolbarFunctionRow->setSpacing(6);
 	QLabel* ToolbarFunctionLabel = new QLabel(mLocalization->tr("settings.toolbar_functionality", "Functionality:"));
+	ToolbarFunctionLabel->setStyleSheet("font-weight: bold;");
 	QLabel* ToolbarFunctionValue = new QLabel("-");
 	ToolbarFunctionValue->setWordWrap(true);
 	ToolbarFunctionValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	ToolbarDetailLayout->addWidget(ToolbarFunctionLabel);
-	ToolbarDetailLayout->addWidget(ToolbarFunctionValue);
+	ToolbarFunctionRow->addWidget(ToolbarFunctionLabel);
+	ToolbarFunctionRow->addWidget(ToolbarFunctionValue, 1);
+	ToolbarDetailLayout->addLayout(ToolbarFunctionRow);
 
 	QHBoxLayout* ToolbarIconLayout = new QHBoxLayout();
 	ToolbarIconLayout->addWidget(new QLabel(mLocalization->tr("settings.toolbar_icon", "Icon:")));
@@ -9359,6 +9657,13 @@ void mlMainWindow::OnEditOptions()
 	ToolbarDivider->setFrameShape(QFrame::HLine);
 	ToolbarDetailLayout->addWidget(ToolbarDivider);
 
+	QListWidget* ToolbarList = new QListWidget(ToolbarTab);
+	ToolbarList->setObjectName("ToolbarSettingsList");
+	ToolbarList->setIconSize(QSize(20, 20));
+	ToolbarList->setSelectionMode(QAbstractItemView::SingleSelection);
+	ToolbarList->setMinimumHeight(200);
+	ToolbarLayout->addWidget(ToolbarList, 1);
+
 	QHBoxLayout* ToolbarButtonsLayout = new QHBoxLayout();
 	QPushButton* ToolbarMoveUpButton = new QPushButton(mLocalization->tr("settings.toolbar_move_up", "Move Up"));
 	QPushButton* ToolbarMoveDownButton = new QPushButton(mLocalization->tr("settings.toolbar_move_down", "Move Down"));
@@ -9373,8 +9678,7 @@ void mlMainWindow::OnEditOptions()
 	ToolbarButtonsLayout->addWidget(ToolbarRemoveButton);
 	ToolbarButtonsLayout->addWidget(ToolbarResetButton);
 	ToolbarButtonsLayout->addStretch(1);
-	ToolbarDetailLayout->addLayout(ToolbarButtonsLayout);
-	ToolbarDetailLayout->addStretch(1);
+	ToolbarLayout->addLayout(ToolbarButtonsLayout);
 
 	auto RefreshToolbarRow = [&](int Index)
 	{
@@ -9426,6 +9730,7 @@ void mlMainWindow::OnEditOptions()
 			ToolbarRemoveButton->setEnabled(false);
 			ToolbarMoveUpButton->setEnabled(false);
 			ToolbarMoveDownButton->setEnabled(false);
+			ToolbarHelpBtn->setEnabled(false);
 		}
 		else
 		{
@@ -9440,6 +9745,7 @@ void mlMainWindow::OnEditOptions()
 			ToolbarRemoveButton->setEnabled(!Item.BuiltIn);
 			ToolbarMoveUpButton->setEnabled(ToolbarSelectedIndex > 0);
 			ToolbarMoveDownButton->setEnabled(ToolbarSelectedIndex < ToolbarItems.count() - 1);
+			ToolbarHelpBtn->setEnabled(Item.BuiltIn);
 		}
 		ToolbarIconEdit->setEnabled(ToolbarSelectedIndex >= 0);
 		ToolbarIconBrowse->setEnabled(ToolbarSelectedIndex >= 0);
@@ -9577,6 +9883,34 @@ void mlMainWindow::OnEditOptions()
 	{
 		LoadToolbarSelection();
 	});
+	connect(ToolbarHelpBtn, &QToolButton::clicked, &Dialog, [&, ToolbarList]()
+	{
+		if (ToolbarSelectedIndex < 0 || ToolbarSelectedIndex >= ToolbarItems.count() || !ToolbarItems[ToolbarSelectedIndex].BuiltIn)
+			return;
+		const ToolbarItemConfig& Item = ToolbarItems[ToolbarSelectedIndex];
+		QString HelpText;
+		if (Item.BuiltInActionKey == "file-new")
+			HelpText = "Create a new map or mod from a template.";
+		else if (Item.BuiltInActionKey == "edit-build")
+			HelpText = "Compile, link, and/or run the selected items.";
+		else if (Item.BuiltInActionKey == "edit-analyze")
+			HelpText = "Analyze scripts for errors and missing assets.";
+		else if (Item.BuiltInActionKey == "edit-information")
+			HelpText = "View detailed information about the selected item.";
+		else if (Item.BuiltInActionKey == "edit-ready-for-publish")
+			HelpText = "Run a publish-readyness check.";
+		else if (Item.BuiltInActionKey == "edit-publish")
+			HelpText = "Upload the selected item to the Steam Workshop.";
+		else if (Item.BuiltInActionKey == "file-asset-editor")
+			HelpText = "Open the APE (Asset Property Editor) tool.";
+		else if (Item.BuiltInActionKey == "file-level-editor")
+			HelpText = "Open Radiant, the level editor.";
+		else if (Item.BuiltInActionKey == "extra-tools-menu")
+			HelpText = "Access launcher and community tools. Add external programs in Options -> Extra Tools.";
+		else
+			HelpText = QString("Built-in action: %1").arg(Item.BuiltInActionKey);
+		QMessageBox::information(&Dialog, mLocalization->tr("common.help", "Help"), HelpText);
+	});
 	connect(ToolbarIconEdit, &QLineEdit::textChanged, &Dialog, [=](const QString&)
 	{
 		CommitToolbarInlineEdits();
@@ -9650,6 +9984,153 @@ void mlMainWindow::OnEditOptions()
 	RefreshToolbarList();
 	LoadToolbarSelection();
 	AddSettingsPage(mLocalization->tr("settings.toolbar", "Toolbar"), style()->standardIcon(QStyle::SP_TitleBarMenuButton), ToolbarTab);
+
+	// --- Extra Tools settings page ---
+	QWidget* ExtraToolsTab = new QWidget(&Dialog);
+	QVBoxLayout* ExtraToolsLayout = new QVBoxLayout(ExtraToolsTab);
+	ExtraToolsLayout->setContentsMargins(14, 14, 14, 14);
+	ExtraToolsLayout->setSpacing(8);
+
+	ExtraToolsLayout->addWidget(new QLabel(mLocalization->tr("settings.extra_tools_desc", "Manage external programs that appear in the Extra Tools menu.")));
+	struct ExtraToolEntry { QString Name; QString Path; QString Icon; };
+	QList<ExtraToolEntry> ExtraTools;
+	{
+		QSettings ET;
+		int Count = ET.beginReadArray("ExtraTools");
+		for (int i = 0; i < Count; i++)
+		{
+			ET.setArrayIndex(i);
+			ExtraToolEntry E;
+			E.Name = ET.value("Name").toString();
+			E.Path = ET.value("Path").toString();
+			E.Icon = ET.value("Icon").toString();
+			if (!E.Name.isEmpty())
+				ExtraTools.append(E);
+		}
+		ET.endArray();
+	}
+	QTreeWidget* ExtraToolsList = new QTreeWidget(ExtraToolsTab);
+	ExtraToolsList->setHeaderLabels(QStringList() << "Name" << "Path" << "Icon");
+	ExtraToolsList->setRootIsDecorated(false);
+	ExtraToolsList->setAlternatingRowColors(false);
+	ExtraToolsList->setSelectionMode(QAbstractItemView::SingleSelection);
+	ExtraToolsList->setColumnWidth(0, 160);
+	ExtraToolsList->setColumnWidth(1, 300);
+	ExtraToolsList->setColumnWidth(2, 200);
+	auto RefreshExtraToolsList = [ExtraToolsList, &ExtraTools]()
+	{
+		ExtraToolsList->clear();
+		for (int ETIdx = 0; ETIdx < ExtraTools.size(); ETIdx++)
+		{
+			const ExtraToolEntry& E = ExtraTools[ETIdx];
+			QTreeWidgetItem* Item = new QTreeWidgetItem(ExtraToolsList);
+			Item->setText(0, E.Name);
+			Item->setText(1, E.Path);
+			Item->setText(2, E.Icon);
+			Item->setData(0, Qt::UserRole, ETIdx);
+		}
+	};
+	RefreshExtraToolsList();
+	ExtraToolsLayout->addWidget(ExtraToolsList, 1);
+
+	QHBoxLayout* ExtraToolsButtons = new QHBoxLayout();
+	QPushButton* ETAddBtn = new QPushButton("Add Program...");
+	QPushButton* ETRemoveBtn = new QPushButton("Remove");
+	QPushButton* ETEditBtn = new QPushButton("Edit...");
+	ExtraToolsButtons->addWidget(ETAddBtn);
+	ExtraToolsButtons->addWidget(ETRemoveBtn);
+	ExtraToolsButtons->addWidget(ETEditBtn);
+	ExtraToolsButtons->addStretch(1);
+	ExtraToolsLayout->addLayout(ExtraToolsButtons);
+
+	int ETSelectedIndex = -1;
+	connect(ExtraToolsList, &QTreeWidget::itemSelectionChanged, ExtraToolsTab, [&, ExtraToolsList]()
+	{
+		auto Selected = ExtraToolsList->selectedItems();
+		ETSelectedIndex = Selected.isEmpty() ? -1 : Selected.first()->data(0, Qt::UserRole).toInt();
+		ETRemoveBtn->setEnabled(ETSelectedIndex >= 0);
+		ETEditBtn->setEnabled(ETSelectedIndex >= 0);
+	});
+	ETRemoveBtn->setEnabled(false);
+	ETEditBtn->setEnabled(false);
+
+	auto EditExtraToolDialog = [&](ExtraToolEntry* Entry, bool IsNew) -> bool
+	{
+		QDialog Dlg(&Dialog);
+		Dlg.setWindowTitle(IsNew ? "Add Program" : "Edit Program");
+		Dlg.resize(500, 200);
+		QFormLayout* FL = new QFormLayout(&Dlg);
+		QLineEdit* NameEdit = new QLineEdit(Entry ? Entry->Name : QString(), &Dlg);
+		NameEdit->setPlaceholderText("Program name (e.g. Notepad++)");
+		QLineEdit* PathEdit = new QLineEdit(Entry ? Entry->Path : QString(), &Dlg);
+		PathEdit->setPlaceholderText("Full path to executable");
+		QLineEdit* IconEdit = new QLineEdit(Entry ? Entry->Icon : QString(), &Dlg);
+		IconEdit->setPlaceholderText("Optional icon path");
+		QHBoxLayout* PathRow = new QHBoxLayout();
+		PathRow->addWidget(PathEdit, 1);
+		QPushButton* BrowseBtn = new QPushButton("Browse...", &Dlg);
+		PathRow->addWidget(BrowseBtn);
+		QHBoxLayout* IconRow = new QHBoxLayout();
+		IconRow->addWidget(IconEdit, 1);
+		QPushButton* IconBrowseBtn = new QPushButton("Browse...", &Dlg);
+		IconRow->addWidget(IconBrowseBtn);
+		FL->addRow("Name:", NameEdit);
+		FL->addRow("Path:", PathRow);
+		FL->addRow("Icon:", IconRow);
+		QDialogButtonBox* BtnBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &Dlg);
+		FL->addRow(BtnBox);
+		connect(BrowseBtn, &QPushButton::clicked, &Dlg, [&, PathEdit]()
+		{
+			QString F = QFileDialog::getOpenFileName(&Dlg, "Select Program", QString(), "Executables (*.exe);;All Files (*)");
+			if (!F.isEmpty()) PathEdit->setText(QDir::toNativeSeparators(F));
+		});
+		connect(IconBrowseBtn, &QPushButton::clicked, &Dlg, [&, IconEdit]()
+		{
+			QString F = QFileDialog::getOpenFileName(&Dlg, "Select Icon", QString(), "Images (*.png *.jpg *.ico);;All Files (*)");
+			if (!F.isEmpty()) IconEdit->setText(QDir::toNativeSeparators(F));
+		});
+		connect(BtnBox, SIGNAL(accepted()), &Dlg, SLOT(accept()));
+		connect(BtnBox, SIGNAL(rejected()), &Dlg, SLOT(reject()));
+		if (Dlg.exec() != QDialog::Accepted)
+			return false;
+		if (Entry)
+		{
+			Entry->Name = NameEdit->text().trimmed();
+			Entry->Path = PathEdit->text().trimmed();
+			Entry->Icon = IconEdit->text().trimmed();
+		}
+		return true;
+	};
+
+	connect(ETAddBtn, &QPushButton::clicked, ExtraToolsTab, [&]()
+	{
+		ExtraToolEntry NewE;
+		if (!EditExtraToolDialog(&NewE, true) || NewE.Name.isEmpty())
+			return;
+		ExtraTools.append(NewE);
+		RefreshExtraToolsList();
+		ExtraToolsList->setCurrentItem(ExtraToolsList->topLevelItem(ExtraTools.count() - 1));
+	});
+	connect(ETRemoveBtn, &QPushButton::clicked, ExtraToolsTab, [&]()
+	{
+		if (ETSelectedIndex < 0 || ETSelectedIndex >= ExtraTools.size())
+			return;
+		if (QMessageBox::question(&Dialog, "Remove", QString("Remove '%1'?").arg(ExtraTools[ETSelectedIndex].Name)) != QMessageBox::Yes)
+			return;
+		ExtraTools.removeAt(ETSelectedIndex);
+		RefreshExtraToolsList();
+	});
+	connect(ETEditBtn, &QPushButton::clicked, ExtraToolsTab, [&]()
+	{
+		if (ETSelectedIndex < 0 || ETSelectedIndex >= ExtraTools.size())
+			return;
+		ExtraToolEntry& E = ExtraTools[ETSelectedIndex];
+		if (!EditExtraToolDialog(&E, false))
+			return;
+		RefreshExtraToolsList();
+	});
+	ExtraToolsLayout->addStretch(1);
+	AddSettingsPage(mLocalization->tr("settings.extra_tools", "Extra Tools"), style()->standardIcon(QStyle::SP_FileDialogStart), ExtraToolsTab);
 
 	QWidget* ThemesTab = new QWidget(&Dialog);
 	QVBoxLayout* ThemesLayout = new QVBoxLayout(ThemesTab);
@@ -10486,7 +10967,21 @@ void mlMainWindow::OnEditOptions()
 	Settings.setValue("ShowRecents", ShowRecentsCheckbox->isChecked());
 	Settings.setValue("ShowFavorites", ShowFavoritesCheckbox->isChecked());
 	Settings.setValue("ShowStartupQuote", ShowStartupQuoteCheckbox->isChecked());
+	Settings.setValue("ShowUnpublishedTab", ShowUnpublishedTabCheckbox->isChecked());
+	Settings.setValue("ShowPublishedTab", ShowPublishedTabCheckbox->isChecked());
 	SaveToolbarItems(ToolbarItems);
+	{
+		QSettings ETSet;
+		ETSet.beginWriteArray("ExtraTools");
+		for (int i = 0; i < ExtraTools.size(); i++)
+		{
+			ETSet.setArrayIndex(i);
+			ETSet.setValue("Name", ExtraTools[i].Name);
+			ETSet.setValue("Path", ExtraTools[i].Path);
+			ETSet.setValue("Icon", ExtraTools[i].Icon);
+		}
+		ETSet.endArray();
+	}
 	SaveThemeProfile(SelectedThemeProfileId, ThemeProfileDisplayName(SelectedThemeProfileId), SelectedThemeValues);
 	ApplyThemeProfile(SelectedThemeProfileId);
 	if (mStartupQuoteLabel)
@@ -10588,7 +11083,7 @@ void mlMainWindow::UpdateTheme()
 				"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #e9e9e9; font-weight: 400; }"
 				"#ItemInternalNameLabel, #ItemTypeTag { color: #9a9a9a; padding: 0; margin-left: 2px; }"
 				"#QuickLaunchCombo { min-height: 34px; max-height: 34px; }"
-				"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 3px 8px; text-align: left; background: #5f5f5f; border: 1px solid #7a7a7a; border-radius: 6px; color: #d8d8d8; }"
+				"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 3px 8px; text-align: left; color: #000000; }"
 				"#QuickLaunchPopup { background: #3d3d3d; border: 1px solid #7a7a7a; }"
 				"#QuickLaunchSearch { min-height: 24px; padding: 4px 8px; background: #5f5f5f; border: 1px solid #7a7a7a; color: #e4e4e4; }"
 				"#QuickLaunchTabs::tab { padding: 4px 8px; margin-right: 2px; background: #555555; border: 1px solid #767676; color: #d6d6d6; }"
@@ -10602,7 +11097,7 @@ void mlMainWindow::UpdateTheme()
 					"#QuickActionStrip { min-height: 22px; }"
 					"#QuickActionButton { min-height: 18px; padding: 0 4px; }"
 					"#QuickMiniActionButton { background: transparent; border: 0; padding: 0; min-height: 22px; color: #b1b1b1; }"
-					"#DisplayNameAddButton { min-height: 18px; padding: 0; }"
+					"#DisplayNameAddButton { min-height: 20px; min-width: 20px; padding: 0; background: #5f5f5f; border: 1px solid #7a7a7a; border-radius: 4px; color: #d8d8d8; }"
 				"#OutputTabs { background: transparent; }"
 				"#OutputTabs::tab { padding: 4px 8px; margin: 4px 2px 0 0; min-width: 44px; font-size: 11px; }"
 				"#LogFiltersButton { background: transparent; border: 0; padding: 0 8px; min-height: 18px; color: #d8d8d8; font-size: 11px; }"
@@ -10617,8 +11112,9 @@ void mlMainWindow::UpdateTheme()
 			+ "#ItemTitleWidget[hovered=\"true\"] #ItemNameButton, #ItemTitleWidget[hovered=\"true\"] #ItemInternalNameLabel, #ItemTitleWidget[hovered=\"true\"] #ItemTypeTag { color: #111111; }"
 			+ "#ItemTitleWidget[selected=\"true\"] #ItemNameButton, #ItemTitleWidget[selected=\"true\"] #ItemInternalNameLabel, #ItemTitleWidget[selected=\"true\"] #ItemTypeTag { color: #000000; }"
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverLight)
-			+ QString("#QuickMiniActionButton:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
-			+ "#WorkshopVersionsList { border: 1px solid #5a5a5a; background: #262626; outline: 0; }"
++ QString("#QuickMiniActionButton:hover { border-color: %1; color: %1; }").arg(AccentHoverLight)
++ QString("#DisplayNameAddButton:hover { background: #707070; border-color: %1; color: %1; }").arg(AccentHoverLight)
++ "#WorkshopVersionsList { border: 1px solid #5a5a5a; background: #262626; outline: 0; }"
 			+ "#WorkshopVersionsList::item { border: 1px solid transparent; border-radius: 10px; margin: 3px 2px; padding: 2px; background: transparent; outline: 0; }"
 			+ "#WorkshopVersionsList::item:hover { background: #3a3a3a; border-color: #707070; }"
 			+ "#WorkshopVersionsList::item:selected { background: #4a4a4a; border-color: #8d8d8d; }"
@@ -10644,7 +11140,7 @@ void mlMainWindow::UpdateTheme()
 			"#SettingsNavList::item { padding: 10px 12px; border-radius: 6px; }"
 			"#SettingsNavList::item:selected { background: #3b3b3b; color: #f0f0f0; }"
 				"#CategoryTabs { background: transparent; }"
-					"#CategoryTabs::tab { background: #3a3a3a; color: palette(button-text); border: 1px solid #2a2a2a; border-bottom: 0; padding: 8px 16px 8px 12px; margin: 6px 3px 0 0; min-width: 84px; border-top-left-radius: 8px; border-top-right-radius: 8px; }"
+					"#CategoryTabs::tab { background: #3a3a3a; color: palette(button-text); border: 1px solid #2a2a2a; border-bottom: 0; padding: 6px 12px; margin: 4px 2px 0 0; border-top-left-radius: 6px; border-top-right-radius: 6px; }"
 				"#OutputTabs { background: transparent; }"
 				"#OutputTabs::tab { background: #2b2b2b; border: 1px solid #1e1e1e; border-bottom: 0; padding: 4px 8px; margin: 4px 2px 0 0; min-width: 48px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-size: 11px; }"
 						"#AssetTree { margin-top: 0; border-top-left-radius: 0; padding: 0; background: #4f4f4f; }"
@@ -10652,9 +11148,8 @@ void mlMainWindow::UpdateTheme()
 				"#AssetTree::item { min-height: 26px; padding: 2px 0; margin: 4px 0; color: transparent; }"
 				"#AssetTree::item:hover { background: transparent; color: transparent; }"
 				"#AssetTree::item:selected { background: transparent; color: transparent; }"
-				"#AssetTree::indicator { width: 0px; height: 0px; margin: 0px; }"
-				"#AssetTree::branch { background: transparent; }"
-					"#OutputConsole, #OutputConsoleViewport, #OutputConsolePlain, #OutputConsolePlainViewport { background: #161616; }"
+"#AssetTree::indicator { width: 0px; height: 0px; margin: 0px; }"
+"#OutputConsole, #OutputConsoleViewport, #OutputConsolePlain, #OutputConsolePlainViewport { background: #161616; }"
 				"#OutputConsole::item { padding: 0; margin: 0; border: 0; background: transparent; }"
 				"#OutputConsole::branch { width: 0px; background: transparent; }"
 					"#ItemTitleWidget, #QuickActionStrip { background: #3a3a3a; border: 0; border-radius: 4px; }"
@@ -10669,8 +11164,9 @@ void mlMainWindow::UpdateTheme()
 			"#ItemNameButton { background: transparent; border: 0; padding: 0; text-align: left; color: #ffffff; font-weight: 600; }"
 				"#ItemInternalNameLabel { color: #bcbcbc; background: #3f3f3f; border: 1px solid #575757; border-radius: 5px; padding: 1px 6px; margin-left: 2px; }"
 			"#QuickLaunchCombo { min-height: 34px; max-height: 34px; }"
-			"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 6px 10px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
-			"#QuickLaunchPopup { background: #2d2d2d; border: 1px solid #505050; border-radius: 10px; }"
+"#QuickLaunchButton { min-height: 34px; max-height: 34px; padding: 6px 10px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
+"#QuickLaunchButton:hover { background: #343434; border-color: #5a5a5a; }"
+"#QuickLaunchPopup { background: #2d2d2d; border: 1px solid #505050; border-radius: 10px; }"
 			"#QuickLaunchSearch { min-height: 26px; padding: 4px 8px; background: #3a3a3a; border: 1px solid #5a5a5a; border-radius: 8px; color: #f0f0f0; }"
 			"#QuickLaunchTabs::tab { padding: 5px 10px; margin-right: 3px; background: #343434; border: 1px solid #4a4a4a; border-radius: 7px; color: #d0d0d0; }"
 			"#QuickLaunchTabs::tab:selected { background: #555555; color: #ffffff; }"
@@ -10700,8 +11196,8 @@ void mlMainWindow::UpdateTheme()
 			+ QString("QToolBar QToolButton:hover { margin: 0; padding: 6px 8px; border: 1px solid %1; }").arg(AccentHoverLight)
 			+ "QToolBar QToolButton:pressed { margin: 0; padding: 6px 8px; border: 1px solid transparent; }"
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverLight)
-				+ QString("#CategoryTabs::tab:selected { color: palette(button-text); background: %1; border-color: %1; }").arg(AccentHoverLight)
-				+ QString("#CategoryTabs::tab:selected:hover { color: palette(button-text); background: %1; border-color: %1; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
++ QString("#CategoryTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverLight)
++ QString("#CategoryTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
 				+ QString("#CategoryTabs::tab:hover { color: palette(button-text); border-color: %1; }").arg(AccentHoverLight)
 				+ QString("#OutputTabs::tab:selected { color: #111111; background: %1; border-color: %1; }").arg(AccentHoverLight)
 				+ QString("#OutputTabs::tab:selected:hover { color: #111111; background: %1; border-color: %1; }").arg(QColor(AccentHoverLight).darker(108).name(QColor::HexRgb))
@@ -10734,7 +11230,7 @@ void mlMainWindow::UpdateTheme()
 						"#SettingsNavList::item:selected { background: #303030; color: #eef1f4; }"
 				"#AssetListPanel { background: transparent; }"
 				"#CategoryTabs { background: transparent; }"
-					"#CategoryTabs::tab { background: #2d2d2d; color: palette(button-text); border: 1px solid #444444; border-bottom: 0; padding: 9px 17px 9px 13px; margin: 8px 4px 0 0; min-width: 84px; border-top-left-radius: 10px; border-top-right-radius: 10px; }"
+					"#CategoryTabs::tab { background: #2d2d2d; color: palette(button-text); border: 1px solid #444444; border-bottom: 0; padding: 6px 12px; margin: 4px 2px 0 0; border-top-left-radius: 7px; border-top-right-radius: 7px; }"
 				"#OutputTabs { background: transparent; }"
 				"#OutputTabs::tab { background: #1d1d1d; color: #aeb7c0; border: 1px solid #363636; border-bottom: 0; padding: 4px 8px; margin: 4px 2px 0 0; min-width: 48px; border-top-left-radius: 7px; border-top-right-radius: 7px; font-size: 11px; }"
 						"QMenuBar, QToolBar { background: #2b2b2b; border: 0; spacing: 6px; padding: 8px; }"
@@ -10749,9 +11245,8 @@ void mlMainWindow::UpdateTheme()
 					" background: #1b1b1b; border: 1px solid #363636; border-radius: 12px; color: #eef1f4; padding: 6px; selection-background-color: #303030; selection-color: #ffffff; }"
 						"#AssetTree { margin-top: 0; border-top-left-radius: 0; padding: 0; background: #1b1b1b; }"
 						"#AssetTree::viewport { background: #1b1b1b; }"
-			"#AssetTree { show-decoration-selected: 0; }"
-			"#AssetTree::branch, #AssetTree::branch:selected { background: transparent; }"
-						"#AssetTree::item { padding: 2px 0; margin: 4px 0; border-radius: 10px; background: transparent; color: transparent; }"
+"#AssetTree { show-decoration-selected: 0; }"
+"#AssetTree::item { padding: 2px 0; margin: 4px 0; border-radius: 10px; background: transparent; color: transparent; }"
 						"#AssetTree::item:hover { background: transparent; color: transparent; }"
 						"#AssetTree::item:selected { background: transparent; color: transparent; }"
 			"#AssetTree::indicator { width: 0px; height: 0px; margin: 0px; }"
@@ -10788,8 +11283,9 @@ void mlMainWindow::UpdateTheme()
 			"#ItemSelectCheckBox::indicator { width: 14px; height: 14px; border-radius: 4px; margin: 0; }"
 			"QComboBox { padding: 6px 28px 6px 10px; }"
 			"#QuickLaunchCombo { min-height: 36px; max-height: 36px; }"
-			"#QuickLaunchButton { min-height: 36px; max-height: 36px; padding: 7px 16px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
-			"#QuickLaunchPopup { background: #1b1b1b; border: 1px solid #363636; border-radius: 14px; }"
+"#QuickLaunchButton { min-height: 36px; max-height: 36px; padding: 7px 16px; text-align: left; background: #242424; border: 1px solid #3a3a3a; border-radius: 8px; color: #eef1f4; }"
+"#QuickLaunchButton:hover { background: #303030; border-color: #5a5a5a; }"
+"#QuickLaunchPopup { background: #1b1b1b; border: 1px solid #363636; border-radius: 14px; }"
 			"#QuickLaunchSearch { min-height: 28px; padding: 5px 9px; background: #202020; border: 1px solid #363636; border-radius: 9px; color: #eef1f4; }"
 			"#QuickLaunchTabs::tab { padding: 6px 12px; margin-right: 4px; background: #242424; border: 1px solid #363636; border-radius: 9px; color: #b7bec6; }"
 			"#QuickLaunchTabs::tab:selected { background: #353535; color: #ffffff; }"
@@ -10810,8 +11306,8 @@ void mlMainWindow::UpdateTheme()
 				"#FooterRefreshButton { padding: 2px 4px; }"
 				"#FooterDownloadButton { background: #1f2d23; border: 1px solid #35523d; border-radius: 8px; min-height: 18px; padding: 3px 9px; color: #eef6f0; }")
 			+ QString("#OutputConsole, #OutputConsolePlain { color: %1; }").arg(DefaultLogColor)
-				+ QString("#CategoryTabs::tab:selected { color: palette(button-text); background: %1; border-color: %1; }").arg(AccentHoverDark)
-				+ QString("#CategoryTabs::tab:selected:hover { color: palette(button-text); background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
++ QString("#CategoryTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverDark)
++ QString("#CategoryTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
 				+ QString("#CategoryTabs::tab:hover { color: palette(button-text); border-color: %1; }").arg(AccentHoverDark)
 				+ QString("#OutputTabs::tab:selected { color: #ffffff; background: %1; border-color: %1; }").arg(AccentHoverDark)
 				+ QString("#OutputTabs::tab:selected:hover { color: #ffffff; background: %1; border-color: %1; }").arg(QColor(AccentHoverDark).darker(112).name(QColor::HexRgb))
@@ -10819,8 +11315,9 @@ void mlMainWindow::UpdateTheme()
 				+ QString("#ItemNameButton:hover { background: transparent; color: %1; }").arg(AccentHoverDark)
 			+ QString("QPushButton:hover { background: #303030; border-color: %1; color: %1; }").arg(AccentHoverDark)
 			+ QString("#LogFiltersButton:hover { background: transparent; border: 0; color: %1; }").arg(AccentHoverDark)
-			+ QString("#BuildButton, #BuildEnglishButton { background: #20262d; border-color: %1; color: #ffffff; font-weight: 700; }").arg(AccentHoverDark)
-			+ "#BuildButton:disabled, #BuildEnglishButton:disabled { background: #1b1b1b; border-color: #363636; color: #7f8993; }"
++ "#BuildButton, #BuildEnglishButton { background: #1f2d23; border: 1px solid #35523d; color: #eef6f0; font-weight: 700; }"
++ "#BuildButton:hover, #BuildEnglishButton:hover { background: #2a3d2f; border-color: #4d7a5a; }"
++ "#BuildButton:disabled, #BuildEnglishButton:disabled { background: #1b1b1b; border-color: #363636; color: #7f8993; }"
 			+ QString("#QuickActionButton:hover { background: #343434; border-color: %1; color: %1; }").arg(AccentHoverDark)
 			+ QString("#QuickMiniActionButton:hover { background: #343434; border-color: %1; color: %1; }").arg(AccentHoverDark)
 			+ QString("#DisplayNameAddButton:hover { background: #343434; border-color: %1; color: %1; }").arg(AccentHoverDark)
@@ -10907,6 +11404,7 @@ void mlMainWindow::OnEditDvars()
 {
 	QDialog Dialog(this, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
 	Dialog.setWindowTitle(mLocalization->tr("dialog.dvar_options", "Dvar Options"));
+	Dialog.resize(820, 560);
 
 	QVBoxLayout* Layout = new QVBoxLayout(&Dialog);
 
@@ -10914,23 +11412,68 @@ void mlMainWindow::OnEditDvars()
 	Label->setText(mLocalization->tr("dialog.dvar_intro", "Saved dvars are applied automatically whenever the launcher starts the game.\nEntries marked with * differ from their default value."));
 	Layout->addWidget(Label);
 
-	QTreeWidget* DvarTree = new QTreeWidget(&Dialog);
-	DvarTree->setColumnCount(2);
-	DvarTree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-	DvarTree->setHeaderLabels(QStringList() << "Dvar" << "Value");
-	DvarTree->setUniformRowHeights(true);
-	DvarTree->setRootIsDecorated(false);
-	Layout->addWidget(DvarTree);
+	QTabWidget* Tabs = new QTabWidget(&Dialog);
+	Layout->addWidget(Tabs, 1);
+
+	auto BuildTab = [&](const QString& Title, dvar_s* Dvars, int DvarCount) -> QTreeWidget*
+	{
+		QWidget* TabPage = new QWidget();
+		QVBoxLayout* TabLayout = new QVBoxLayout(TabPage);
+		TabLayout->setContentsMargins(4, 4, 4, 4);
+
+		QSplitter* Splitter = new QSplitter(Qt::Horizontal, TabPage);
+		TabLayout->addWidget(Splitter, 1);
+
+		QTreeWidget* Tree = new QTreeWidget(Splitter);
+		Tree->setColumnCount(2);
+		Tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+		Tree->setHeaderLabels(QStringList() << "Dvar" << "Value");
+		Tree->setUniformRowHeights(true);
+		Tree->setRootIsDecorated(false);
+		Tree->setMinimumWidth(320);
+
+		QTextEdit* DescPanel = new QTextEdit(Splitter);
+		DescPanel->setReadOnly(true);
+		DescPanel->setPlaceholderText("Select a dvar to see its description.");
+		DescPanel->setMinimumWidth(200);
+
+		Splitter->addWidget(Tree);
+		Splitter->addWidget(DescPanel);
+		Splitter->setStretchFactor(0, 2);
+		Splitter->setStretchFactor(1, 1);
+
+		for (int Idx = 0; Idx < DvarCount; Idx++)
+			Dvar(Dvars[Idx], Tree);
+
+		connect(Tree, &QTreeWidget::currentItemChanged, [=](QTreeWidgetItem* Current, QTreeWidgetItem*)
+		{
+			if (Current)
+			{
+				QString dvarName = Current->data(0, Qt::UserRole).toString();
+				dvar_s dvar = Dvar::findDvar(dvarName, Dvars, DvarCount);
+				QString html = QString("<h3>%1</h3><p>%2</p>").arg(dvar.name, dvar.description);
+				if (dvar.type == DVAR_VALUE_INT)
+					html += QString("<p><i>Range: %1 – %2</i></p>").arg(dvar.minValue).arg(dvar.maxValue);
+				DescPanel->setHtml(html);
+			}
+			else
+			{
+				DescPanel->clear();
+			}
+		});
+
+		Tabs->addTab(TabPage, Title);
+		return Tree;
+	};
+
+	QTreeWidget* MainTree = BuildTab("Main", gDvars, ARRAYSIZE(gDvars));
+	QTreeWidget* SecondaryTree = BuildTab("Secondary", gSecondaryDvars, gSecondaryDvarsCount);
 
 	QDialogButtonBox* ButtonBox = new QDialogButtonBox(&Dialog);
 	ButtonBox->setOrientation(Qt::Horizontal);
 	ButtonBox->setStandardButtons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
 	ButtonBox->setCenterButtons(true);
-
 	Layout->addWidget(ButtonBox);
-
-	for(int DvarIdx = 0; DvarIdx < ARRAYSIZE(gDvars); DvarIdx++)
-		Dvar(gDvars[DvarIdx], DvarTree);
 
 	connect(ButtonBox, SIGNAL(accepted()), &Dialog, SLOT(accept()));
 	connect(ButtonBox, SIGNAL(rejected()), &Dialog, SLOT(reject()));
@@ -10938,25 +11481,31 @@ void mlMainWindow::OnEditDvars()
 	if (Dialog.exec() != QDialog::Accepted)
 		return;
 
-	for (int ItemIdx = 0; ItemIdx < DvarTree->topLevelItemCount(); ItemIdx++)
+	auto SaveTree = [&](QTreeWidget* Tree, dvar_s* Dvars, int DvarCount)
 	{
-		QTreeWidgetItem* Item = DvarTree->topLevelItem(ItemIdx);
-		QWidget* widget = DvarTree->itemWidget(Item, 1);
-		QString dvarName = Item->data(0, Qt::UserRole).toString();
-		dvar_s dvar = Dvar::findDvar(dvarName, gDvars, ARRAYSIZE(gDvars));
-		switch(dvar.type)
+		for (int Idx = 0; Idx < Tree->topLevelItemCount(); Idx++)
 		{
-		case DVAR_VALUE_BOOL:
-			Dvar::setDvarSetting(dvar, (QCheckBox*)widget);
-			break;
-		case DVAR_VALUE_INT:
-			Dvar::setDvarSetting(dvar, (QSpinBox*)widget);
-			break;
-		case DVAR_VALUE_STRING:
-			Dvar::setDvarSetting(dvar, (QLineEdit*)widget);
-			break;
+			QTreeWidgetItem* Item = Tree->topLevelItem(Idx);
+			QWidget* widget = Tree->itemWidget(Item, 1);
+			QString dvarName = Item->data(0, Qt::UserRole).toString();
+			dvar_s dvar = Dvar::findDvar(dvarName, Dvars, DvarCount);
+			switch (dvar.type)
+			{
+			case DVAR_VALUE_BOOL:
+				Dvar::setDvarSetting(dvar, (QCheckBox*)widget);
+				break;
+			case DVAR_VALUE_INT:
+				Dvar::setDvarSetting(dvar, (QSpinBox*)widget);
+				break;
+			case DVAR_VALUE_STRING:
+				Dvar::setDvarSetting(dvar, (QLineEdit*)widget);
+				break;
+			}
 		}
-	}
+	};
+
+	SaveTree(MainTree, gDvars, ARRAYSIZE(gDvars));
+	SaveTree(SecondaryTree, gSecondaryDvars, gSecondaryDvarsCount);
 
 	RefreshRunDvars();
 }

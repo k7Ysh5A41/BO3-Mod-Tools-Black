@@ -460,6 +460,8 @@ private:
 
 	QStringList mRunDvars;
 
+	QLineEdit* mSearchFilterWidget;
+	QString mSearchFilterText;
 
 };
 

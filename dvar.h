@@ -38,3 +38,6 @@ public:
 
 	static dvar_s findDvar(QString, dvar_s*, int);
 };
+
+extern dvar_s gSecondaryDvars[];
+extern const int gSecondaryDvarsCount;
